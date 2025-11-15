@@ -5,9 +5,15 @@ import time
 import shutil
 import atexit
 import importlib
+import logging
 from flask import Flask, request, jsonify, render_template
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
+
+# --- Logging Configuration ---
+# Use Python's standard logging for production-ready output.
+# This will be captured by systemd's journalctl.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Basic Configuration ---
 app = Flask(__name__)
@@ -53,7 +59,7 @@ def receive_task():
             json.dump(task, f, indent=4)
         return jsonify({'status': 'received', 'job_id': job_id})
     except IOError as e:
-        print(f"Error writing to inbound queue: {e}")
+        logging.error(f"Error writing to inbound queue: {e}")
         return jsonify({'status': 'error', 'message': 'Could not save task to queue'}), 500
 
 
@@ -80,7 +86,7 @@ def check_task_status():
 
             return jsonify(task_result)
         except (IOError, json.JSONDecodeError) as e:
-            print(f"Error reading or moving result file: {e}")
+            logging.error(f"Error reading or moving result file: {e}")
             return jsonify({'status': 'error', 'message': 'Could not retrieve result'}), 500
     else:
         return jsonify({'status': 'pending', 'message': 'Job not yet complete.'})
@@ -104,7 +110,7 @@ def write_result_to_outbound(job_id, result_data):
         with open(filepath, 'w') as f:
             json.dump(result_data, f, indent=4)
     except IOError as e:
-        print(f"Error writing result for job {job_id}: {e}")
+        logging.error(f"Error writing result for job {job_id}: {e}")
 
 
 def process_inbound_queue():
@@ -119,7 +125,7 @@ def process_inbound_queue():
     if not os.path.exists(inbound_queue_dir):
         return
 
-    print("Scheduler worker checking for tasks...")
+    logging.info("Scheduler worker checking for tasks...")
     tasks = sorted(os.listdir(inbound_queue_dir))
     if not tasks:
         return
@@ -132,13 +138,13 @@ def process_inbound_queue():
         os.makedirs(consumed_dir, exist_ok=True)
         shutil.move(task_filepath, consumed_filepath)
     except FileNotFoundError:
-        print(f"Task {task_filename} already claimed by another worker. Skipping.")
+        logging.info(f"Task {task_filename} already claimed by another worker. Skipping.")
         return
     except Exception as e:
-        print(f"Error claiming task {task_filename}: {e}")
+        logging.error(f"Error claiming task {task_filename}: {e}")
         return
 
-    print(f"Worker claimed task: {task_filename}")
+    logging.info(f"Worker claimed task: {task_filename}")
     task_to_process = None
     try:
         with open(consumed_filepath, 'r') as f:
@@ -148,7 +154,7 @@ def process_inbound_queue():
         action_name = task_to_process.get('action')
         params = task_to_process.get('params')
 
-        print(f"Processing job {job_id} for action '{action_name}'")
+        logging.info(f"Processing job {job_id} for action '{action_name}'")
 
         # Dynamically import and execute the action
         action_module_path = f"{actions_dir}.{action_name}"
@@ -157,13 +163,13 @@ def process_inbound_queue():
 
     except (ModuleNotFoundError, AttributeError):
         error_message = f"Action '{action_name}' not found or does not have an 'execute' function."
-        print(error_message)
+        logging.error(error_message)
         result = {'job_id': job_id, 'status': 'failed', 'error': error_message}
         write_result_to_outbound(job_id, result)
         os.makedirs(failed_dir, exist_ok=True)
         shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
     except Exception as e:
-        print(f"Failed to process task {task_filename}: {e}")
+        logging.error(f"Failed to process task {task_filename}: {e}")
         job_id = task_to_process.get('job_id') if task_to_process else "unknown"
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
         write_result_to_outbound(job_id, result)
@@ -173,9 +179,9 @@ def process_inbound_queue():
 
 # --- Initialize and Run Server ---
 if __name__ == '__main__':
-    print(f"Application running in '{APP_ENV}' mode.")
+    logging.info(f"Application running in '{APP_ENV}' mode.")
     base_queue_path = app.config['BASE_QUEUE_PATH']
-    print(f"Using queue base path: '{base_queue_path}'")
+    logging.info(f"Using queue base path: '{base_queue_path}'")
 
     for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
         os.makedirs(os.path.join(base_queue_path, dir_name), exist_ok=True)
@@ -196,6 +202,6 @@ if __name__ == '__main__':
     atexit.register(lambda: scheduler.shutdown())
 
     scheduler.start()
-    print("Scheduler started with concurrent processing enabled. Server is running.")
+    logging.info("Scheduler started with concurrent processing enabled. Server is running.")
 
     app.run(host='0.0.0.0', port=5000, debug=(APP_ENV == 'development'))
