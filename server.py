@@ -2,37 +2,32 @@ import os
 import json
 import uuid
 import time
-from flask import Flask, request, jsonify
+import shutil
+from flask import Flask, request, jsonify, render_template
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
 
 # --- Basic Configuration ---
 app = Flask(__name__)
-# Use a simple file-based system for our queues
-INBOUND_QUEUE_FILE = 'inbound_queue.json'
-OUTBOUND_QUEUE_FILE = 'outbound_queue.json'
+
+# --- Environment-based Configuration ---
+# Get the environment context. Default to 'development' if not set.
+APP_ENV = os.environ.get('APP_ENV', 'development')
+
+if APP_ENV == 'production':
+    # In production, you might use a more robust path like /var/queues/
+    # These are read from environment variables for flexibility.
+    BASE_QUEUE_PATH = os.environ.get('QUEUE_BASE_PATH', 'prod_queues')
+else:
+    # In development, just use local folders.
+    BASE_QUEUE_PATH = 'dev_queues'
+
+# Define queue directories based on the environment context
+INBOUND_QUEUE_DIR = os.path.join(BASE_QUEUE_PATH, 'inbound')
+OUTBOUND_QUEUE_DIR = os.path.join(BASE_QUEUE_PATH, 'outbound')
+CONSUMED_DIR = os.path.join(BASE_QUEUE_PATH, 'consumed')  # For processed inbound messages
 DOWNLOAD_DIR = 'downloads'
-
-
-# --- Queue Management Functions ---
-
-def get_queue(file_path):
-    """Reads a queue file, ensuring it's not corrupt."""
-    if not os.path.exists(file_path):
-        return []
-    try:
-        with open(file_path, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return []
-
-
-def save_queue(file_path, data):
-    """Saves data to a queue file."""
-    with open(file_path, 'w') as f:
-        json.dump(data, f, indent=4)
 
 
 # --- API Endpoints ---
@@ -53,11 +48,16 @@ def receive_task():
         'received_at': time.time()
     }
 
-    inbound_queue = get_queue(INBOUND_QUEUE_FILE)
-    inbound_queue.append(task)
-    save_queue(INBOUND_QUEUE_FILE, inbound_queue)
+    filename = f"{int(time.time() * 1000)}_{job_id}.json"
+    filepath = os.path.join(INBOUND_QUEUE_DIR, filename)
 
-    return jsonify({'status': 'received', 'job_id': job_id})
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(task, f, indent=4)
+        return jsonify({'status': 'received', 'job_id': job_id})
+    except IOError as e:
+        print(f"Error writing to inbound queue: {e}")
+        return jsonify({'status': 'error', 'message': 'Could not save task to queue'}), 500
 
 
 @app.route('/outbound', methods=['GET'])
@@ -67,113 +67,121 @@ def check_task_status():
     if not job_id:
         return jsonify({'status': 'error', 'message': 'Job ID is required'}), 400
 
-    outbound_queue = get_queue(OUTBOUND_QUEUE_FILE)
+    result_filepath = os.path.join(OUTBOUND_QUEUE_DIR, f"{job_id}.json")
 
-    # Find the result and remove it from the queue upon retrieval
-    task_result = None
-    remaining_tasks = []
-    for task in outbound_queue:
-        if task.get('job_id') == job_id:
-            task_result = task
-        else:
-            remaining_tasks.append(task)
+    if os.path.exists(result_filepath):
+        try:
+            with open(result_filepath, 'r') as f:
+                task_result = json.load(f)
 
-    if task_result:
-        save_queue(OUTBOUND_QUEUE_FILE, remaining_tasks)  # Update queue
-        return jsonify(task_result)
+            # Instead of deleting, move the result file to the consumed folder for auditing
+            consumed_path = os.path.join(CONSUMED_DIR, f"result_{job_id}.json")
+            shutil.move(result_filepath, consumed_path)
+
+            return jsonify(task_result)
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"Error reading or moving result file: {e}")
+            return jsonify({'status': 'error', 'message': 'Could not retrieve result'}), 500
     else:
         return jsonify({'status': 'pending', 'message': 'Job not yet complete.'})
 
 
+# --- NEW: 404 Error Handler using Templates ---
+@app.errorhandler(404)
+def page_not_found(e):
+    """
+    Renders the custom 404 HTML page from the templates folder.
+    """
+    return render_template('404.html'), 404
+
+
 # --- Job Processing Logic ---
+
+def write_result_to_outbound(job_id, result_data):
+    """Saves a task's result to a JSON file in the outbound directory."""
+    filepath = os.path.join(OUTBOUND_QUEUE_DIR, f"{job_id}.json")
+    try:
+        with open(filepath, 'w') as f:
+            json.dump(result_data, f, indent=4)
+    except IOError as e:
+        print(f"Error writing result for job {job_id}: {e}")
+
 
 def download_website_recursively(job_id, url, base_path):
     """A sample long-running task: recursively download a website."""
     try:
-        if not os.path.exists(base_path):
-            os.makedirs(base_path)
-
-        # Basic recursive download logic (for demonstration)
-        # In a real-world scenario, this would be far more robust.
+        os.makedirs(base_path, exist_ok=True)
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
-
         file_path = os.path.join(base_path, 'index.html')
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(soup.prettify())
-
-        # This is a highly simplified example. A full recursive download is complex.
-        # It would need to handle CSS, JS, images, and avoid re-downloading.
-
-        # Simulate a long process
-        time.sleep(15)  # Simulate work
-
-        # Add result to the outbound queue
-        outbound_queue = get_queue(OUTBOUND_QUEUE_FILE)
-        outbound_queue.append({
+        time.sleep(15)
+        result = {
             'job_id': job_id,
             'status': 'complete',
             'result': f'Successfully downloaded content from {url} to {base_path}'
-        })
-        save_queue(OUTBOUND_QUEUE_FILE, outbound_queue)
-
+        }
+        write_result_to_outbound(job_id, result)
     except Exception as e:
-        # Log failures to the outbound queue as well
-        outbound_queue = get_queue(OUTBOUND_QUEUE_FILE)
-        outbound_queue.append({
-            'job_id': job_id,
-            'status': 'failed',
-            'error': str(e)
-        })
-        save_queue(OUTBOUND_QUEUE_FILE, outbound_queue)
+        result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+        write_result_to_outbound(job_id, result)
 
 
 def process_inbound_queue():
     """Scheduler job to check the inbound queue and start processing."""
     print("Scheduler waking up to check for tasks...")
-    inbound_queue = get_queue(INBOUND_QUEUE_FILE)
-    if not inbound_queue:
-        return
+    try:
+        tasks = sorted(os.listdir(INBOUND_QUEUE_DIR))
+        if not tasks:
+            return
 
-    # Process one task at a time (FIFO)
-    task_to_process = inbound_queue.pop(0)
-    save_queue(INBOUND_QUEUE_FILE, inbound_queue)  # Update queue immediately
+        task_filename = tasks[0]
+        task_filepath = os.path.join(INBOUND_QUEUE_DIR, task_filename)
 
-    print(f"Processing task: {task_to_process['job_id']}")
+        task_to_process = None
+        try:
+            with open(task_filepath, 'r') as f:
+                task_to_process = json.load(f)
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"Could not read or parse task file {task_filename}. Error: {e}")
+            shutil.move(task_filepath, os.path.join(CONSUMED_DIR, f"bad_{task_filename}"))
+            return
 
-    action = task_to_process.get('action')
-    job_id = task_to_process.get('job_id')
-    params = task_to_process.get('params')
+        # Move the file to the consumed directory BEFORE processing
+        # This prevents a crash during processing from causing the task to run again
+        shutil.move(task_filepath, os.path.join(CONSUMED_DIR, task_filename))
 
-    if action == 'full_recursive_download':
-        url = params.get('url')
-        if url:
-            download_path = os.path.join(DOWNLOAD_DIR, job_id)
-            download_website_recursively(job_id, url, download_path)
-    else:
-        # Handle other actions or unknown actions
-        print(f"Unknown action: {action}")
-        # Optionally, put a failure message in the outbound queue
-        outbound_queue = get_queue(OUTBOUND_QUEUE_FILE)
-        outbound_queue.append({'job_id': job_id, 'status': 'failed', 'error': 'Unknown action'})
-        save_queue(OUTBOUND_QUEUE_FILE, outbound_queue)
+        print(f"Processing task: {task_to_process.get('job_id')}")
+        action = task_to_process.get('action')
+        job_id = task_to_process.get('job_id')
+        params = task_to_process.get('params')
+
+        if action == 'full_recursive_download':
+            url = params.get('url')
+            if url:
+                download_path = os.path.join(DOWNLOAD_DIR, job_id)
+                download_website_recursively(job_id, url, download_path)
+        else:
+            print(f"Unknown action: {action}")
+            result = {'job_id': job_id, 'status': 'failed', 'error': 'Unknown action'}
+            write_result_to_outbound(job_id, result)
+
+    except Exception as e:
+        print(f"An unexpected error occurred in the scheduler: {e}")
 
 
 # --- Initialize and Run Server ---
 if __name__ == '__main__':
-    # Ensure queue files exist
-    if not os.path.exists(INBOUND_QUEUE_FILE): save_queue(INBOUND_QUEUE_FILE, [])
-    if not os.path.exists(OUTBOUND_QUEUE_FILE): save_queue(OUTBOUND_QUEUE_FILE, [])
-    if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
+    # Ensure all necessary directories exist
+    print(f"Application running in '{APP_ENV}' mode.")
+    print(f"Using queue base path: '{BASE_QUEUE_PATH}'")
+    for dir_path in [INBOUND_QUEUE_DIR, OUTBOUND_QUEUE_DIR, CONSUMED_DIR, DOWNLOAD_DIR, 'static', 'templates']:
+        os.makedirs(dir_path, exist_ok=True)
 
-    # Setup and start the background scheduler
     scheduler = BackgroundScheduler()
-    # Check the queue every 10 seconds
     scheduler.add_job(process_inbound_queue, 'interval', seconds=10)
     scheduler.start()
     print("Scheduler started. Server is running.")
 
-    # Start the Flask web server
-    # For production, use a proper WSGI server like Gunicorn or Waitress.
-    # Use 0.0.0.0 to make it accessible on your network.
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=(APP_ENV == 'development'))
