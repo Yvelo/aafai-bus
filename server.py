@@ -4,30 +4,25 @@ import uuid
 import time
 import shutil
 import atexit
+import importlib
 from flask import Flask, request, jsonify, render_template
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
-import requests
-from bs4 import BeautifulSoup
 
 # --- Basic Configuration ---
 app = Flask(__name__)
 
 # --- Centralized Application Configuration ---
-# Get the environment context. Default to 'development' if not set.
 APP_ENV = os.environ.get('APP_ENV', 'development')
 
 if APP_ENV == 'production':
-    # In production, read from an environment variable for flexibility.
     base_path = os.environ.get('QUEUE_BASE_PATH', 'prod_queues')
 else:
-    # In development or testing, use a default local folder.
-    # This value will be overridden by the test fixture in conftest.py during tests.
     base_path = 'dev_queues'
 
-# Set the configuration on the Flask app object. This is the single source of truth.
 app.config['BASE_QUEUE_PATH'] = base_path
 app.config['DOWNLOAD_DIR'] = 'downloads'
+app.config['ACTIONS_DIR'] = 'actions'
 
 
 # --- API Endpoints ---
@@ -48,13 +43,11 @@ def receive_task():
         'received_at': time.time()
     }
 
-    # Build path dynamically from the app's config at runtime
     inbound_queue_dir = os.path.join(app.config['BASE_QUEUE_PATH'], 'inbound')
     filename = f"{int(time.time() * 1000)}_{job_id}.json"
     filepath = os.path.join(inbound_queue_dir, filename)
 
     try:
-        # Ensure the directory exists before writing to it.
         os.makedirs(inbound_queue_dir, exist_ok=True)
         with open(filepath, 'w') as f:
             json.dump(task, f, indent=4)
@@ -71,7 +64,6 @@ def check_task_status():
     if not job_id:
         return jsonify({'status': 'error', 'message': 'Job ID is required'}), 400
 
-    # Build paths dynamically from the app's config at runtime
     base_path = app.config['BASE_QUEUE_PATH']
     outbound_queue_dir = os.path.join(base_path, 'outbound')
     consumed_dir = os.path.join(base_path, 'consumed')
@@ -82,7 +74,6 @@ def check_task_status():
             with open(result_filepath, 'r') as f:
                 task_result = json.load(f)
 
-            # Ensure consumed directory exists before moving the file
             os.makedirs(consumed_dir, exist_ok=True)
             consumed_path = os.path.join(consumed_dir, f"result_{job_id}.json")
             shutil.move(result_filepath, consumed_path)
@@ -106,7 +97,6 @@ def page_not_found(e):
 
 def write_result_to_outbound(job_id, result_data):
     """Saves a task's result to a JSON file in the outbound directory."""
-    # Build path dynamically from the app's config at runtime
     outbound_queue_dir = os.path.join(app.config['BASE_QUEUE_PATH'], 'outbound')
     filepath = os.path.join(outbound_queue_dir, f"{job_id}.json")
     try:
@@ -117,40 +107,15 @@ def write_result_to_outbound(job_id, result_data):
         print(f"Error writing result for job {job_id}: {e}")
 
 
-def download_website_recursively(job_id, url, base_path):
-    """A sample long-running task: recursively download a website."""
-    try:
-        os.makedirs(base_path, exist_ok=True)
-        response = requests.get(url, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        file_path = os.path.join(base_path, 'index.html')
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(soup.prettify())
-        # Simulating a long-running job
-        time.sleep(5)
-        result = {
-            'job_id': job_id,
-            'status': 'complete',
-            'result': f'Successfully downloaded content from {url} to {base_path}'
-        }
-    except Exception as e:
-        result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
-
-    write_result_to_outbound(job_id, result)
-
-
 def process_inbound_queue():
-    """Scheduler job to check for and process a single task from the inbound queue.
-    This function is designed to be run concurrently by multiple workers.
-    """
-    # Build paths dynamically from the app's config at runtime
+    """Scheduler job to check for and process a single task from the inbound queue."""
     base_path = app.config['BASE_QUEUE_PATH']
     inbound_queue_dir = os.path.join(base_path, 'inbound')
     consumed_dir = os.path.join(base_path, 'consumed')
     failed_dir = os.path.join(base_path, 'failed')
     download_dir = app.config['DOWNLOAD_DIR']
+    actions_dir = app.config['ACTIONS_DIR']
 
-    # This check is important for the scheduler running in the background
     if not os.path.exists(inbound_queue_dir):
         return
 
@@ -164,19 +129,15 @@ def process_inbound_queue():
     consumed_filepath = os.path.join(consumed_dir, task_filename)
 
     try:
-        # Atomically move the task to the 'consumed' directory to claim it.
-        # This prevents other concurrent workers from picking up the same task.
         os.makedirs(consumed_dir, exist_ok=True)
         shutil.move(task_filepath, consumed_filepath)
     except FileNotFoundError:
-        # This is expected if another worker grabbed the file first.
         print(f"Task {task_filename} already claimed by another worker. Skipping.")
         return
     except Exception as e:
         print(f"Error claiming task {task_filename}: {e}")
         return
 
-    # At this point, this worker has exclusive access to the task file.
     print(f"Worker claimed task: {task_filename}")
     task_to_process = None
     try:
@@ -184,78 +145,57 @@ def process_inbound_queue():
             task_to_process = json.load(f)
 
         job_id = task_to_process.get('job_id')
-        action = task_to_process.get('action')
+        action_name = task_to_process.get('action')
         params = task_to_process.get('params')
 
-        print(f"Processing job {job_id} for action '{action}'")
+        print(f"Processing job {job_id} for action '{action_name}'")
 
-        if action == 'full_recursive_download':
-            url = params.get('url')
-            if url:
-                download_path = os.path.join(download_dir, job_id)
-                download_website_recursively(job_id, url, download_path)
-            else:
-                raise ValueError("'url' parameter is missing for 'full_recursive_download'")
-        else:
-            raise ValueError(f"Unknown action: {action}")
+        # Dynamically import and execute the action
+        action_module_path = f"{actions_dir}.{action_name}"
+        action_module = importlib.import_module(action_module_path)
+        action_module.execute(job_id, params, download_dir, write_result_to_outbound)
 
+    except (ModuleNotFoundError, AttributeError):
+        error_message = f"Action '{action_name}' not found or does not have an 'execute' function."
+        print(error_message)
+        result = {'job_id': job_id, 'status': 'failed', 'error': error_message}
+        write_result_to_outbound(job_id, result)
+        os.makedirs(failed_dir, exist_ok=True)
+        shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
     except Exception as e:
         print(f"Failed to process task {task_filename}: {e}")
-        job_id = task_to_process.get('job_id') if task_to_process else None
-        if not job_id:
-            try:
-                # Fallback to parsing job_id from the filename
-                job_id = task_filename.split('_')[1].replace('.json', '')
-            except IndexError:
-                job_id = "unknown"
-
-        # Write a failure result to the outbound queue
+        job_id = task_to_process.get('job_id') if task_to_process else "unknown"
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
         write_result_to_outbound(job_id, result)
-
-        # Move the failed task file for later inspection
         os.makedirs(failed_dir, exist_ok=True)
         shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
 
 
 # --- Initialize and Run Server ---
 if __name__ == '__main__':
-    # Ensure all necessary directories exist using the centralized config
     print(f"Application running in '{APP_ENV}' mode.")
     base_queue_path = app.config['BASE_QUEUE_PATH']
     print(f"Using queue base path: '{base_queue_path}'")
 
-    # Create queue subdirectories
     for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
         os.makedirs(os.path.join(base_queue_path, dir_name), exist_ok=True)
 
-    # Create other necessary root directories
-    for dir_path in [app.config['DOWNLOAD_DIR'], 'static', 'templates']:
+    for dir_path in [app.config['DOWNLOAD_DIR'], 'static', 'templates', app.config['ACTIONS_DIR']]:
         os.makedirs(dir_path, exist_ok=True)
 
-    # --- Scheduler Configuration for Concurrent Processing ---
-    # Configure a thread pool to allow multiple tasks to run in parallel.
     executors = {
-        'default': ThreadPoolExecutor(5)  # Allow up to 5 concurrent jobs
+        'default': ThreadPoolExecutor(5)
     }
     job_defaults = {
-        'coalesce': False,  # Run every scheduled job, even if the previous one is still running
-        'max_instances': 5  # Allow up to 5 instances of the same job to run concurrently
+        'coalesce': False,
+        'max_instances': 5
     }
     scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
-
-    # Add the job to process the inbound queue at regular intervals.
     scheduler.add_job(process_inbound_queue, 'interval', seconds=5)
 
-    # --- Graceful Shutdown ---
-    # Register a function to shut down the scheduler when the app exits.
-    # This ensures that ongoing tasks are completed before the application stops.
     atexit.register(lambda: scheduler.shutdown())
 
     scheduler.start()
     print("Scheduler started with concurrent processing enabled. Server is running.")
 
-    # Start the Flask app.
-    # Note: In debug mode, Flask's reloader will start two instances of the app,
-    # which means the scheduler will also run twice. This is fine for development.
     app.run(host='0.0.0.0', port=5000, debug=(APP_ENV == 'development'))

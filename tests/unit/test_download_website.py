@@ -1,56 +1,44 @@
 import os
-import json
 from unittest.mock import patch, MagicMock
 import requests
 from bs4 import BeautifulSoup
 
-from server import download_website_recursively
+# Import the function to be tested from its new location
+from actions.full_recursive_download import execute
 
 
-def test_download_website_recursively_success(client, app):
+def test_execute_download_success(app):
     """
-    Tests the success scenario for downloading a website.
+    Tests the success scenario for the 'full_recursive_download' action.
     - Mocks network requests and other external dependencies.
-    - Simulates receiving a task via an API call to get a job_id.
-    - Directly calls the worker function to simulate its execution.
-    - Verifies the final result is written correctly.
+    - Directly calls the action's execute function.
+    - Verifies the final result is passed to the callback correctly.
     """
     # 1. ARRANGE
     job_id = "test-job-success"
     url = "http://mit.edu"
-    download_path = os.path.join(app.config['DOWNLOAD_DIR'], job_id)
+    download_dir = app.config['DOWNLOAD_DIR']
+    download_path = os.path.join(download_dir, job_id)
     mock_html = "<html><body><h1>Test Page</h1></body></html>"
     expected_content = BeautifulSoup(mock_html, 'html.parser').prettify()
+    mock_write_result = MagicMock()
+    params = {'url': url}
 
     # 2. ACT & MOCK
-    # We patch the dependencies of the function we are about to manually execute.
-    with patch('server.requests.get') as mock_get, \
-            patch('server.time.sleep', return_value=None) as mock_sleep, \
-            patch('server.write_result_to_outbound') as mock_write_result, \
-            patch('uuid.uuid4', return_value=job_id):  # Mock job_id for predictability
-
-        # First, call the API to simulate the job being created.
-        response = client.post('/inbound', data=json.dumps({
-            'action': 'download_website',
-            'params': {'url': url}
-        }), content_type='application/json')
-
-        # API should confirm receipt of the job
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['status'] == 'received'
-        assert data['job_id'] == job_id
+    # Patch the dependencies of the function we are testing.
+    with patch('actions.full_recursive_download.requests.get') as mock_get, \
+         patch('actions.full_recursive_download.time.sleep', return_value=None) as mock_sleep:
 
         # Configure the mock for a successful download
         mock_response = MagicMock()
         mock_response.text = mock_html
         mock_get.return_value = mock_response
 
-        # Now, manually execute the function to simulate a background worker picking up the task.
-        download_website_recursively(job_id, url, download_path)
+        # Manually execute the action function
+        execute(job_id, params, download_dir, mock_write_result)
 
     # 3. ASSERT
-    # Assert that the network call was made correctly by the function
+    # Assert that the network call was made correctly
     mock_get.assert_called_once_with(url, timeout=10)
 
     # Assert that the file was created and contains the correct content
@@ -71,42 +59,29 @@ def test_download_website_recursively_success(client, app):
     mock_write_result.assert_called_once_with(job_id, expected_result_data)
 
 
-def test_download_website_recursively_network_failure(client, app):
+def test_execute_download_network_failure(app):
     """
-    Tests the failure scenario for downloading a website.
+    Tests the failure scenario for the 'full_recursive_download' action.
     - Mocks the network request to raise an exception.
-    - Simulates receiving a task via an API call.
-    - Directly calls the worker function to simulate its execution.
-    - Verifies that the 'failed' status is written correctly.
+    - Directly calls the action's execute function.
+    - Verifies that the 'failed' status is passed to the callback correctly.
     """
     # 1. ARRANGE
     job_id = "test-job-failure"
     url = "http://example-fails.com"
-    download_path = os.path.join(app.config['DOWNLOAD_DIR'], job_id)
+    download_dir = app.config['DOWNLOAD_DIR']
+    download_path = os.path.join(download_dir, job_id)
     error_message = "Network Error"
+    mock_write_result = MagicMock()
+    params = {'url': url}
 
     # 2. ACT & MOCK
-    with patch('server.requests.get') as mock_get, \
-            patch('server.write_result_to_outbound') as mock_write_result, \
-            patch('uuid.uuid4', return_value=job_id):  # Mock job_id for predictability
-
-        # First, call the API to simulate the job being created.
-        response = client.post('/inbound', data=json.dumps({
-            'action': 'download_website',
-            'params': {'url': url}
-        }), content_type='application/json')
-
-        # API should confirm receipt of the job
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['status'] == 'received'
-        assert data['job_id'] == job_id
-
+    with patch('actions.full_recursive_download.requests.get') as mock_get:
         # Configure the mock to raise a RequestException
         mock_get.side_effect = requests.exceptions.RequestException(error_message)
 
-        # Manually execute the function to simulate the worker
-        download_website_recursively(job_id, url, download_path)
+        # Manually execute the action function
+        execute(job_id, params, download_dir, mock_write_result)
 
     # 3. ASSERT
     # Assert that a network call was attempted
