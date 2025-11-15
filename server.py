@@ -11,8 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 # --- Logging Configuration ---
-# Use Python's standard logging for production-ready output.
-# This will be captured by systemd's journalctl.
+# Configure logging immediately. This ensures it's active when Gunicorn imports the file.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Basic Configuration ---
@@ -20,7 +19,6 @@ app = Flask(__name__)
 
 # --- Centralized Application Configuration ---
 APP_ENV = os.environ.get('APP_ENV', 'development')
-
 if APP_ENV == 'production':
     base_path = os.environ.get('QUEUE_BASE_PATH', 'prod_queues')
 else:
@@ -29,6 +27,30 @@ else:
 app.config['BASE_QUEUE_PATH'] = base_path
 app.config['DOWNLOAD_DIR'] = 'downloads'
 app.config['ACTIONS_DIR'] = 'actions'
+
+# --- Application Initialization (Moved from __main__) ---
+# This code will now run when the file is imported by Gunicorn or run directly.
+logging.info(f"Application starting in '{APP_ENV}' mode.")
+base_queue_path = app.config['BASE_QUEUE_PATH']
+logging.info(f"Using queue base path: '{base_queue_path}'")
+
+# Create necessary directories on startup
+for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
+    os.makedirs(os.path.join(base_queue_path, dir_name), exist_ok=True)
+for dir_path in [app.config['DOWNLOAD_DIR'], 'static', 'templates', app.config['ACTIONS_DIR']]:
+    os.makedirs(dir_path, exist_ok=True)
+
+# --- Scheduler Configuration ---
+executors = {'default': ThreadPoolExecutor(5)}
+job_defaults = {'coalesce': False, 'max_instances': 5}
+scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
+scheduler.add_job(func=lambda: process_inbound_queue(), trigger='interval', seconds=5)
+
+# Register a graceful shutdown for the scheduler
+atexit.register(lambda: scheduler.shutdown())
+
+scheduler.start()
+logging.info("Scheduler started with concurrent processing enabled.")
 
 
 # --- API Endpoints ---
@@ -115,93 +137,72 @@ def write_result_to_outbound(job_id, result_data):
 
 def process_inbound_queue():
     """Scheduler job to check for and process a single task from the inbound queue."""
-    base_path = app.config['BASE_QUEUE_PATH']
-    inbound_queue_dir = os.path.join(base_path, 'inbound')
-    consumed_dir = os.path.join(base_path, 'consumed')
-    failed_dir = os.path.join(base_path, 'failed')
-    download_dir = app.config['DOWNLOAD_DIR']
-    actions_dir = app.config['ACTIONS_DIR']
+    # Use app_context to ensure Flask configurations are available in the thread
+    with app.app_context():
+        base_path = app.config['BASE_QUEUE_PATH']
+        inbound_queue_dir = os.path.join(base_path, 'inbound')
+        consumed_dir = os.path.join(base_path, 'consumed')
+        failed_dir = os.path.join(base_path, 'failed')
+        download_dir = app.config['DOWNLOAD_DIR']
+        actions_dir = app.config['ACTIONS_DIR']
 
-    if not os.path.exists(inbound_queue_dir):
-        return
+        if not os.path.exists(inbound_queue_dir):
+            return
 
-    logging.info("Scheduler worker checking for tasks...")
-    tasks = sorted(os.listdir(inbound_queue_dir))
-    if not tasks:
-        return
+        logging.info("Scheduler worker checking for tasks...")
+        tasks = sorted(os.listdir(inbound_queue_dir))
+        if not tasks:
+            return
 
-    task_filename = tasks[0]
-    task_filepath = os.path.join(inbound_queue_dir, task_filename)
-    consumed_filepath = os.path.join(consumed_dir, task_filename)
+        task_filename = tasks[0]
+        task_filepath = os.path.join(inbound_queue_dir, task_filename)
+        consumed_filepath = os.path.join(consumed_dir, task_filename)
 
-    try:
-        os.makedirs(consumed_dir, exist_ok=True)
-        shutil.move(task_filepath, consumed_filepath)
-    except FileNotFoundError:
-        logging.info(f"Task {task_filename} already claimed by another worker. Skipping.")
-        return
-    except Exception as e:
-        logging.error(f"Error claiming task {task_filename}: {e}")
-        return
+        try:
+            os.makedirs(consumed_dir, exist_ok=True)
+            shutil.move(task_filepath, consumed_filepath)
+        except FileNotFoundError:
+            logging.info(f"Task {task_filename} already claimed. Skipping.")
+            return
+        except Exception as e:
+            logging.error(f"Error claiming task {task_filename}: {e}")
+            return
 
-    logging.info(f"Worker claimed task: {task_filename}")
-    task_to_process = None
-    try:
-        with open(consumed_filepath, 'r') as f:
-            task_to_process = json.load(f)
+        logging.info(f"Worker claimed task: {task_filename}")
+        task_to_process = None
+        try:
+            with open(consumed_filepath, 'r') as f:
+                task_to_process = json.load(f)
 
-        job_id = task_to_process.get('job_id')
-        action_name = task_to_process.get('action')
-        params = task_to_process.get('params')
+            job_id = task_to_process.get('job_id')
+            action_name = task_to_process.get('action')
+            params = task_to_process.get('params')
 
-        logging.info(f"Processing job {job_id} for action '{action_name}'")
+            logging.info(f"Processing job {job_id} for action '{action_name}'")
 
-        # Dynamically import and execute the action
-        action_module_path = f"{actions_dir}.{action_name}"
-        action_module = importlib.import_module(action_module_path)
-        action_module.execute(job_id, params, download_dir, write_result_to_outbound)
+            action_module_path = f"{actions_dir}.{action_name}"
+            action_module = importlib.import_module(action_module_path)
+            action_module.execute(job_id, params, download_dir, write_result_to_outbound)
 
-    except (ModuleNotFoundError, AttributeError):
-        error_message = f"Action '{action_name}' not found or does not have an 'execute' function."
-        logging.error(error_message)
-        result = {'job_id': job_id, 'status': 'failed', 'error': error_message}
-        write_result_to_outbound(job_id, result)
-        os.makedirs(failed_dir, exist_ok=True)
-        shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
-    except Exception as e:
-        logging.error(f"Failed to process task {task_filename}: {e}")
-        job_id = task_to_process.get('job_id') if task_to_process else "unknown"
-        result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
-        write_result_to_outbound(job_id, result)
-        os.makedirs(failed_dir, exist_ok=True)
-        shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
+        except (ModuleNotFoundError, AttributeError):
+            error_message = f"Action '{action_name}' not found or invalid."
+            logging.error(error_message)
+            result = {'job_id': job_id, 'status': 'failed', 'error': error_message}
+            write_result_to_outbound(job_id, result)
+            os.makedirs(failed_dir, exist_ok=True)
+            shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
+        except Exception as e:
+            logging.error(f"Failed to process task {task_filename}: {e}", exc_info=True)
+            job_id = task_to_process.get('job_id') if task_to_process else "unknown"
+            result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+            write_result_to_outbound(job_id, result)
+            os.makedirs(failed_dir, exist_ok=True)
+            shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
 
 
-# --- Initialize and Run Server ---
+# --- Development Server ---
 if __name__ == '__main__':
-    logging.info(f"Application running in '{APP_ENV}' mode.")
-    base_queue_path = app.config['BASE_QUEUE_PATH']
-    logging.info(f"Using queue base path: '{base_queue_path}'")
-
-    for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
-        os.makedirs(os.path.join(base_queue_path, dir_name), exist_ok=True)
-
-    for dir_path in [app.config['DOWNLOAD_DIR'], 'static', 'templates', app.config['ACTIONS_DIR']]:
-        os.makedirs(dir_path, exist_ok=True)
-
-    executors = {
-        'default': ThreadPoolExecutor(5)
-    }
-    job_defaults = {
-        'coalesce': False,
-        'max_instances': 5
-    }
-    scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
-    scheduler.add_job(process_inbound_queue, 'interval', seconds=5)
-
-    atexit.register(lambda: scheduler.shutdown())
-
-    scheduler.start()
-    logging.info("Scheduler started with concurrent processing enabled. Server is running.")
-
+    # This block is now only used for local development.
+    # Gunicorn does not run this.
+    logging.info("Starting Flask development server.")
     app.run(host='0.0.0.0', port=5000, debug=(APP_ENV == 'development'))
