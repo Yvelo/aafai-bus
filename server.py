@@ -6,28 +6,36 @@ import shutil
 import atexit
 import importlib
 import logging
+import signal
 from flask import Flask, request, jsonify, render_template, current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
-# --- Logging Configuration ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- Constants ---
+MAX_IDLE_TIME_IN_SECONDS = 300
 
 def create_app(testing=False):
     """Application factory for the Flask app."""
     app = Flask(__name__)
 
-    # --- Configuration ---
+    # --- Logging Configuration ---
+    # Set the logging level based on the environment.
+    # In testing, we only want to see critical errors, not INFO or WARNING.
+    log_level = logging.ERROR if testing else logging.INFO
+    # Use force=True to allow reconfiguration for each test run.
+    logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s', force=True)
+
+    # --- App Configuration ---
     APP_ENV = os.environ.get('APP_ENV', 'development')
     if testing:
-        base_path = 'data'
+        base_path = 'test_queues'
     elif APP_ENV == 'production':
-        base_path = os.environ.get('QUEUE_BASE_PATH', 'data')
+        base_path = os.environ.get('QUEUE_BASE_PATH', 'prod_queues')
     else:
-        base_path = 'data'
+        base_path = 'dev_queues'
 
     app.config['BASE_QUEUE_PATH'] = base_path
-    app.config['DOWNLOAD_DIR'] = 'data/downloads'
+    app.config['DOWNLOAD_DIR'] = 'downloads'
     app.config['ACTIONS_DIR'] = 'actions'
     app.config['TESTING'] = testing
 
@@ -39,16 +47,22 @@ def create_app(testing=False):
             os.makedirs(os.path.join(current_app.config['BASE_QUEUE_PATH'], dir_name), exist_ok=True)
         for dir_path in [current_app.config['DOWNLOAD_DIR'], 'static', 'templates', current_app.config['ACTIONS_DIR']]:
             os.makedirs(dir_path, exist_ok=True)
+        
+        timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+        if not os.path.exists(timestamp_file):
+            with open(timestamp_file, 'w') as f:
+                f.write(str(time.time()))
 
     # --- Scheduler ---
     if not testing:
         executors = {'default': ThreadPoolExecutor(5)}
         job_defaults = {'coalesce': False, 'max_instances': 5}
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
-        scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5)
+        scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5, id='process_queue')
+        scheduler.add_job(func=check_idle_shutdown, args=[app], trigger='interval', seconds=30, id='idle_check')
         atexit.register(lambda: scheduler.shutdown())
         scheduler.start()
-        logging.info("Scheduler started.")
+        logging.info("Scheduler started with idle check enabled.")
 
     # --- Register Routes ---
     @app.route('/inbound', methods=['POST'])
@@ -69,6 +83,10 @@ def create_app(testing=False):
 
 def receive_task():
     """Handles creating a new task from an inbound request."""
+    timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+    with open(timestamp_file, 'w') as f:
+        f.write(str(time.time()))
+
     data = request.get_json()
     if not data or 'action' not in data:
         return jsonify({'status': 'error', 'message': 'Invalid request'}), 400
@@ -163,29 +181,65 @@ def process_inbound_queue(app):
 
         logging.info(f"Worker claimed task: {task_filename}")
         task_to_process = None
+        job_id = "unknown"
         try:
             with open(consumed_filepath, 'r') as f:
                 task_to_process = json.load(f)
 
-            job_id = task_to_process.get('job_id')
+            job_id = task_to_process.get('job_id', 'unknown')
             action_name = task_to_process.get('action')
             params = task_to_process.get('params')
             logging.info(f"Processing job {job_id} for action '{action_name}'")
 
-            action_module = importlib.import_module(f"{actions_dir}.{action_name}")
+            try:
+                action_module = importlib.import_module(f"{actions_dir}.{action_name}")
+            except ModuleNotFoundError:
+                raise ValueError(f"Action '{action_name}' not found or is not a valid module.")
+
             action_module.execute(job_id, params, download_dir, write_result_to_outbound)
 
-        except Exception as e:
-            job_id = task_to_process.get('job_id') if task_to_process else "unknown"
-            error_message = f"Failed to process task {task_filename}: {e}"
-            logging.error(error_message, exc_info=True)
+        except (json.JSONDecodeError, ValueError) as e:
+            error_message = f"Failed to process task {task_filename} due to bad input: {e}"
+            logging.warning(error_message)
+            if task_to_process and task_to_process.get('job_id'):
+                job_id = task_to_process.get('job_id')
+            
             result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
             write_result_to_outbound(job_id, result)
             os.makedirs(failed_dir, exist_ok=True)
             shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
 
+        except Exception as e:
+            error_message = f"An unexpected error occurred while processing task {task_filename}: {e}"
+            logging.error(error_message, exc_info=True)
+            if task_to_process and task_to_process.get('job_id'):
+                job_id = task_to_process.get('job_id')
+            
+            result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+            write_result_to_outbound(job_id, result)
+            os.makedirs(failed_dir, exist_ok=True)
+            shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
+
+def check_idle_shutdown(app):
+    """Checks for server idleness and shuts down if necessary."""
+    with app.app_context():
+        timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+        try:
+            with open(timestamp_file, 'r') as f:
+                last_api_call_time = float(f.read().strip())
+            
+            idle_time = time.time() - last_api_call_time
+            logging.info(f"Server idle check: Last API call was {idle_time:.2f} seconds ago.")
+
+            if idle_time > MAX_IDLE_TIME_IN_SECONDS:
+                logging.warning(f"Server idle, initiating graceful shutdown.")
+                master_pid = os.getppid()
+                logging.info(f"Sending SIGTERM to Gunicorn master process (PID: {master_pid}).")
+                os.kill(master_pid, signal.SIGTERM)
+        except (FileNotFoundError, ValueError, IOError) as e:
+            logging.warning(f"Could not check idle time: {e}")
+
 # This block is now only used for local development.
-# Gunicorn will call create_app() directly.
 if __name__ == '__main__':
     app = create_app()
     logging.info("Starting Flask development server.")
