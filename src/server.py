@@ -214,6 +214,15 @@ def process_inbound_queue(app):
             params = task_to_process.get('params')
             logging.info(f"Processing job {job_id} for action '{action_name}'")
 
+            # --- Debug Logging ---
+            actions_path = os.path.join(PROJECT_ROOT, actions_dir)
+            if os.path.exists(actions_path):
+                available_actions = [f.replace('.py', '') for f in os.listdir(actions_path) if f.endswith('.py') and not f.startswith('__')]
+                logging.info(f"Available actions: {available_actions}")
+            else:
+                logging.warning(f"Actions directory not found at: {actions_path}")
+            # --- End Debug Logging ---
+
             try:
                 action_module = importlib.import_module(f"{actions_dir}.{action_name}")
             except ModuleNotFoundError:

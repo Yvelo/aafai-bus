@@ -14,6 +14,13 @@ sudo chmod +x /var/www/aafai-bus/update-aafai-bus-service.sh
 
 echo "Code successfully updated."
 
+# --- Debugging Step ---
+echo "Listing contents of the project root to verify update:"
+ls -l /var/www/aafai-bus/
+echo "Listing contents of the actions directory to verify update:"
+ls -l /var/www/aafai-bus/actions/
+# --- End Debugging Step ---
+
 # 3. Install/update Python dependencies
 echo "Installing Python dependencies..."
 # Assuming you have a virtual environment in /var/www/aafai-bus/venv
