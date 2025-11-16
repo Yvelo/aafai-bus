@@ -20,11 +20,11 @@ def create_app(testing=False):
     # --- Configuration ---
     APP_ENV = os.environ.get('APP_ENV', 'development')
     if testing:
-        base_path = 'data/queues'
+        base_path = 'data'
     elif APP_ENV == 'production':
-        base_path = os.environ.get('QUEUE_BASE_PATH', 'data/queues')
+        base_path = os.environ.get('QUEUE_BASE_PATH', 'data')
     else:
-        base_path = 'data/queues'
+        base_path = 'data'
 
     app.config['BASE_QUEUE_PATH'] = base_path
     app.config['DOWNLOAD_DIR'] = 'data/downloads'
