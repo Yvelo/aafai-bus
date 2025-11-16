@@ -103,9 +103,8 @@ if __name__ == '__main__':
     test_job_id = f"test-job-{uuid.uuid4()}"
     test_params = {'url': test_url}
 
-    # Create a 'downloads' directory in the current path for test output
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    test_download_dir = os.path.join(script_dir, "downloads")
+    # Use a temporary directory for test output to avoid permission issues on servers.
+    test_download_dir = os.path.join("/tmp", "aafai-bus-downloads")
 
     def print_result_to_console(job_id, result):
         """A mock writer function that prints the result to the console."""
