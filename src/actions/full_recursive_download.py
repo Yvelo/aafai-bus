@@ -23,23 +23,27 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
-    # Set user data and cache directories to be inside the writable download_dir
+    # Set user data and other cache directories to be inside the writable download_dir
     user_data_dir = os.path.join(download_dir, "user-data")
     disk_cache_dir = os.path.join(download_dir, "cache")
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
 
-    # Ensure the cache directory for chromedriver exists and is writable
-    chromedriver_cache_dir = os.path.join(download_dir, "chromedriver_cache")
-    os.makedirs(chromedriver_cache_dir, exist_ok=True)
+    # Ensure the cache directory for Selenium Manager exists and is writable
+    selenium_manager_cache_dir = os.path.join(download_dir, "selenium_manager_cache")
+    os.makedirs(selenium_manager_cache_dir, exist_ok=True)
     
-    service = Service(
-        service_args=["--log-path=" + os.path.join(chromedriver_cache_dir, "chromedriver.log"), "--verbose"],
-        executable_path=os.path.join(chromedriver_cache_dir, "chromedriver")
-    )
+    # Pass the cache path to Selenium Manager via the Service object's environment.
+    # We must copy the existing environment to ensure PATH is preserved.
+    service_env = os.environ.copy()
+    service_env['SE_CACHE_PATH'] = selenium_manager_cache_dir
+    
+    service = Service(env=service_env)
 
     driver = None
     try:
+        # The Service object will now correctly configure Selenium Manager
+        # to download and cache the driver in our specified writable directory.
         driver = webdriver.Chrome(service=service, options=chrome_options)
         logging.info(f"Navigating to URL: {url}")
         driver.get(url)
