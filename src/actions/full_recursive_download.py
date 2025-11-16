@@ -22,6 +22,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
     
     # Set user data and other cache directories to be inside the writable download_dir
     user_data_dir = os.path.join(download_dir, "user-data")
@@ -37,7 +38,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     # This will be inherited by Selenium Manager.
     os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
     
-    service = Service()
+    # Enable verbose logging for chromedriver
+    chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
+    service = Service(service_args=['--verbose'], log_path=chromedriver_log_path)
 
     driver = None
     try:
