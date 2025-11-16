@@ -1,5 +1,10 @@
+import sys
+import os
 import pytest
 from unittest.mock import MagicMock
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
+
 from actions import full_recursive_download
 
 def test_full_recursive_download_missing_url(app):

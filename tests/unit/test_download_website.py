@@ -1,9 +1,12 @@
+import sys
 import os
 import pytest
 from unittest.mock import MagicMock, patch
 import http.server
 import socketserver
 import threading
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 # Import the function to be tested
 from actions.full_recursive_download import execute
