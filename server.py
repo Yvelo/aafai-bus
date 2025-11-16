@@ -33,7 +33,6 @@ def create_app(testing=False):
     if testing:
         base_path = os.path.join(PROJECT_ROOT, 'test_queues')
     elif APP_ENV == 'production':
-        # In production, allow overriding via environment variable, but default to a subdir
         base_path = os.environ.get('QUEUE_BASE_PATH', os.path.join(PROJECT_ROOT, 'prod_queues'))
     else:
         base_path = os.path.join(PROJECT_ROOT, 'dev_queues')
@@ -97,7 +96,7 @@ def create_app(testing=False):
     return app
 
 # --- API and Logic (defined outside the factory) ---
-# ... (The rest of the functions remain unchanged)
+
 def receive_task():
     """Handles creating a new task from an inbound request."""
     data = request.get_json()
@@ -203,6 +202,16 @@ def process_inbound_queue(app):
             action_name = task_to_process.get('action')
             params = task_to_process.get('params')
             logging.info(f"Processing job {job_id} for action '{action_name}'")
+
+            # --- DIAGNOSTIC LOGGING ---
+            logging.info(f"Current working directory: {os.getcwd()}")
+            logging.info(f"Python search path: {sys.path}")
+            actions_full_path = os.path.join(PROJECT_ROOT, actions_dir)
+            if os.path.exists(actions_full_path):
+                logging.info(f"Contents of '{actions_full_path}': {os.listdir(actions_full_path)}")
+            else:
+                logging.warning(f"Actions directory '{actions_full_path}' does not exist.")
+            # --- END DIAGNOSTIC LOGGING ---
 
             try:
                 action_module = importlib.import_module(f"{actions_dir}.{action_name}")
