@@ -250,8 +250,6 @@ def check_idle_shutdown(app):
                     f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queue is empty. "
                     "Initiating VM power off."
                 )
-                # Use sudo to power off the machine.
-                # This requires a specific sudoers configuration to work without a password.
                 os.system('sudo /sbin/shutdown --poweroff now')
 
         except (FileNotFoundError, ValueError, IOError) as e:
