@@ -10,13 +10,16 @@ Environment="APP_ENV=production" "QUEUE_BASE_PATH=/var/www/aafai-bus/data"
 User=www-data
 Group=www-data
 
+# Set the working directory, which is now the 'src' directory
+WorkingDirectory=/var/www/aafai-bus/src
+
 # Run the purge script once before starting the main server.
-# The --chdir flag ensures the script runs in the correct directory context.
-ExecStartPre=/var/www/aafai-bus/venv/bin/python /var/www/aafai-bus/startup_purge.py
+# Note: The startup script is now also inside the 'src' directory.
+ExecStartPre=/var/www/aafai-bus/venv/bin/python /var/www/aafai-bus/src/startup_purge.py
 
 # Command to start the app using Gunicorn and the application factory.
-# The --chdir flag is the most reliable way to set the working directory.
-ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 --chdir /var/www/aafai-bus "server:create_app()"
+# Gunicorn's working directory is set by the 'WorkingDirectory' directive above.
+ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 "server:create_app()"
 
 # Restart the service if it ever fails
 Restart=always
