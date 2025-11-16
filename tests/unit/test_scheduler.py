@@ -1,7 +1,7 @@
 import os
 import json
 from unittest.mock import patch
-from server import process_inbound_queue
+from src.server import process_inbound_queue
 
 def test_process_inbound_queue_malformed_json(app):
     """
@@ -18,7 +18,7 @@ def test_process_inbound_queue_malformed_json(app):
         f.write("{'invalid_json': True,}")
 
     # 2. ACT
-    with patch('server.write_result_to_outbound') as mock_write_result:
+    with patch('src.server.write_result_to_outbound') as mock_write_result:
         process_inbound_queue(app)
 
     # 3. ASSERT
@@ -49,7 +49,7 @@ def test_process_inbound_queue_unknown_action(app):
         json.dump(task_data, f)
 
     # 2. ACT
-    with patch('server.write_result_to_outbound') as mock_write_result:
+    with patch('src.server.write_result_to_outbound') as mock_write_result:
         process_inbound_queue(app)
 
     # 3. ASSERT

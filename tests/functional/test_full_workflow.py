@@ -10,7 +10,7 @@ def test_receive_task_file_writing(client, app):
     task_data = {'action': 'test_action', 'params': {'foo': 'bar'}}
 
     # Use a patch to inspect the calls to json.dump
-    with patch('server.json.dump') as mock_json_dump:
+    with patch('src.server.json.dump') as mock_json_dump:
         response = client.post('/inbound',
                                data=json.dumps(task_data),
                                content_type='application/json')

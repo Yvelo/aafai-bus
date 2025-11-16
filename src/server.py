@@ -16,7 +16,7 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 # This ensures the app can be run from anywhere and still find its modules.
 SRC_ROOT = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SRC_ROOT, '..'))
-sys.path.insert(0, SRC_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
 # --- Constants ---
 MAX_IDLE_TIME_IN_SECONDS = 1800
@@ -48,7 +48,7 @@ def create_app(testing=False):
     app.config['BASE_QUEUE_PATH'] = base_path
     # All data directories are now correctly placed in the project root, outside 'src'
     app.config['DOWNLOAD_DIR'] = os.path.join(PROJECT_ROOT, 'downloads')
-    app.config['ACTIONS_DIR'] = 'actions' # This is relative to the SRC_ROOT
+    app.config['ACTIONS_DIR'] = 'actions'
     app.config['TESTING'] = testing
 
     # --- Initialization ---
@@ -63,7 +63,7 @@ def create_app(testing=False):
             os.makedirs(os.path.join(current_app.config['BASE_QUEUE_PATH'], dir_name), exist_ok=True)
         
         # Create code directories (if they don't exist)
-        os.makedirs(os.path.join(SRC_ROOT, app.config['ACTIONS_DIR']), exist_ok=True)
+        os.makedirs(os.path.join(PROJECT_ROOT, app.config['ACTIONS_DIR']), exist_ok=True)
         
         timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
         if not os.path.exists(timestamp_file):

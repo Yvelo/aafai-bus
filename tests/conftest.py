@@ -2,7 +2,7 @@
 import pytest
 import os
 import shutil
-from server import create_app
+from src.server import create_app
 
 @pytest.fixture
 def app():
