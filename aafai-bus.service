@@ -1,0 +1,24 @@
+[Unit]
+Description=Gunicorn instance to serve aafai-bus
+After=network.target
+
+[Service]
+# Run the service as the 'www-data' user
+Environment="APP_ENV=production"
+QUEUE_BASE_PATH="QUEUE_BASE_PATH=/var/www/aafai-bus"
+User=www-data
+Group=www-data
+
+# Set the working directory to your app's root
+WorkingDirectory=/var/www/aafai-bus
+
+# Command to start the app using Gunicorn
+# Make sure the path to gunicorn (inside your venv) is correct!
+# The 'server:app' part means "in the file server.py, find the Flask object named app"
+ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 server:app
+
+# Restart the service if it ever fails
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
