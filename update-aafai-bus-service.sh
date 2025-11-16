@@ -18,7 +18,7 @@ echo "Code successfully updated."
 # These are needed for the chromedriver to run in a headless environment.
 echo "Installing system dependencies for headless Chrome..."
 apt-get update
-apt-get install -y libglib2.0-0 libnss3 libgconf-2-4 libfontconfig1 chromium-browser chromium-chromedriver
+apt-get install -y libglib2.0-0 libnss3 libgconf-2-4 libfontconfig1 chromium chromium-driver
 
 # 4. Install/update Python dependencies
 echo "Installing Python dependencies..."
