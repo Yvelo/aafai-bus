@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 # --- Constants ---
-MAX_IDLE_TIME_IN_SECONDS = 300
+MAX_IDLE_TIME_IN_SECONDS = 1800
 QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
@@ -51,8 +51,13 @@ def create_app(testing=False):
             with open(timestamp_file, 'w') as f:
                 f.write(str(time.time()))
 
-    # --- Scheduler ---
+    # --- Scheduler & Startup Jobs ---
     if not testing:
+        # Run purge job immediately on startup
+        logging.info("Running purge job on startup...")
+        purge_old_files(app)
+
+        # Configure and start the scheduler for recurring jobs
         executors = {'default': ThreadPoolExecutor(5)}
         job_defaults = {'coalesce': False, 'max_instances': 5}
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
@@ -222,7 +227,7 @@ def process_inbound_queue(app):
 def check_idle_shutdown(app):
     """
     Checks if the server has been idle AND the inbound queue is empty.
-    If both conditions are met, it initiates a graceful shutdown.
+    If both conditions are met, it initiates a graceful shutdown via systemd.
     """
     with app.app_context():
         base_path = current_app.config['BASE_QUEUE_PATH']
@@ -243,11 +248,11 @@ def check_idle_shutdown(app):
             if idle_time > MAX_IDLE_TIME_IN_SECONDS:
                 logging.warning(
                     f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queue is empty. "
-                    "Initiating graceful shutdown."
+                    "Initiating graceful shutdown via systemd."
                 )
-                master_pid = os.getppid()
-                logging.info(f"Sending SIGTERM to Gunicorn master process (PID: {master_pid}).")
-                os.kill(master_pid, signal.SIGTERM)
+                # Use sudo to ask systemd to stop our own service.
+                # This requires a specific sudoers configuration to work without a password.
+                os.system('sudo systemctl stop aafai-bus.service')
 
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
