@@ -47,7 +47,7 @@ To ensure the server only accepts requests from trusted sources, we configure a 
 
 ### 3.2. Auto-Shutdown Permissions
 
-The application runs as the low-privileged `www-data` user. To allow it to power off the entire VM, you must grant it a specific, passwordless `sudo` permission.
+The application runs as the low-privileged `www-data` user. To allow it to power off the entire VM after 30 minutes of idle time, you must grant it a specific, passwordless `sudo` permission.
 
 1.  **Edit the Sudoers File:** On your Debian server, run `sudo visudo`. This is the only safe way to edit this file.
 2.  **Add the Rule:** Scroll to the very bottom of the file and add this exact line:

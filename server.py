@@ -16,7 +16,7 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 # --- Constants ---
-MAX_IDLE_TIME_IN_SECONDS = 300
+MAX_IDLE_TIME_IN_SECONDS = 1800
 QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
