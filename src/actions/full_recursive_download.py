@@ -3,6 +3,7 @@ import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 # --- Constants ---
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -17,11 +18,6 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         # This is a programming error, the scheduler should catch it.
         raise ValueError("'url' parameter is missing for 'full_recursive_download'")
 
-    # Set the Selenium cache path to be inside the writable download_dir
-    selenium_cache_dir = os.path.join(download_dir, "selenium_cache")
-    os.makedirs(selenium_cache_dir, exist_ok=True)
-    os.environ['SE_CACHE_PATH'] = selenium_cache_dir
-
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -33,9 +29,18 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
 
+    # Ensure the cache directory for chromedriver exists and is writable
+    chromedriver_cache_dir = os.path.join(download_dir, "chromedriver_cache")
+    os.makedirs(chromedriver_cache_dir, exist_ok=True)
+    
+    service = Service(
+        service_args=["--log-path=" + os.path.join(chromedriver_cache_dir, "chromedriver.log"), "--verbose"],
+        executable_path=os.path.join(chromedriver_cache_dir, "chromedriver")
+    )
+
     driver = None
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         logging.info(f"Navigating to URL: {url}")
         driver.get(url)
 
