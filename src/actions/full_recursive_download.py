@@ -17,6 +17,11 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         # This is a programming error, the scheduler should catch it.
         raise ValueError("'url' parameter is missing for 'full_recursive_download'")
 
+    # Set the Selenium cache path to be inside the writable download_dir
+    selenium_cache_dir = os.path.join(download_dir, "selenium_cache")
+    os.makedirs(selenium_cache_dir, exist_ok=True)
+    os.environ['SE_CACHE_PATH'] = selenium_cache_dir
+
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
