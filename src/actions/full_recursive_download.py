@@ -27,7 +27,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    
+    chrome_options.add_argument("--disable-crash-reporter") # Add this line
+
     # Set user data and other cache directories to be inside the job-specific download_dir
     user_data_dir = os.path.join(job_download_dir, "user-data")
     disk_cache_dir = os.path.join(job_download_dir, "cache")
