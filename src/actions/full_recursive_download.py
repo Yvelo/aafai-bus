@@ -1,4 +1,5 @@
 import logging
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -21,6 +22,12 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
+    # Set user data and cache directories to be inside the writable download_dir
+    user_data_dir = os.path.join(download_dir, "user-data")
+    disk_cache_dir = os.path.join(download_dir, "cache")
+    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+    chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
+
     driver = None
     try:
         driver = webdriver.Chrome(options=chrome_options)
