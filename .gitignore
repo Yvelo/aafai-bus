@@ -3,4 +3,4 @@
 /.venv/Scripts/
 /.venv/.gitignore
 /.venv/pyvenv.cfg
-/downloads/test-job-success/index.html
+/data/downloads/test-job-success/index.html
