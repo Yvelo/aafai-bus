@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import tempfile
 import shutil
 import json
-from src.actions.search_google_scholar import execute, _build_scholar_url, MAX_NUMBER_OF_ARTICLES
+from src.actions.search_google_scholar import execute, _build_scholar_url, DEFAULT_MAX_NUMBER_OF_ARTICLES
 
 
 # Mock the _get_total_estimated_results to return a consistent value for tests
@@ -104,6 +104,7 @@ class TestSearchGoogleScholarFunctional:
                 "all_words": "test query",
                 "date_range": {"start_year": 2020, "end_year": 2023}
             },
+            "fetch_author_details": True, # Added this line
         }
 
         # Create a temporary directory for the test
@@ -179,6 +180,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "nonexistent query"
             },
+            "fetch_author_details": True, # Added this line
         }
 
         temp_download_dir = tempfile.mkdtemp()
@@ -295,6 +297,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "pagination test"
             },
+            "fetch_author_details": True, # Added this line
         }
 
         temp_download_dir = tempfile.mkdtemp()
@@ -374,6 +377,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "error test"
             },
+            "fetch_author_details": True, # Added this line
         }
 
         temp_download_dir = tempfile.mkdtemp()
@@ -437,4 +441,4 @@ class TestSearchGoogleScholarFunctional:
         """
         query_params = {}
         url = _build_scholar_url(query_params)
-        assert url == "https://scholar.google.com/scholar"
+        assert url == "https://scholar.google.com/scholar?hl=en"
