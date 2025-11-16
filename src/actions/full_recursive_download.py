@@ -40,9 +40,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     
     os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
     
-    # Enable verbose logging for chromedriver
+    # Enable verbose logging for chromedriver by passing the argument directly
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(service_args=['--verbose'], log_path=chromedriver_log_path)
+    service = Service(service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = None
     try:
