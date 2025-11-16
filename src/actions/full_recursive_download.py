@@ -5,6 +5,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+import json # Import json for pretty printing
 
 # --- Constants ---
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -84,3 +85,30 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         # shutil.rmtree(job_download_dir)
 
     write_result_to_outbound(job_id, result)
+
+
+if __name__ == '__main__':
+    # This block allows the script to be run directly for testing purposes.
+    # Example: python full_recursive_download.py "https://www.google.com"
+    import sys
+    import uuid
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    if len(sys.argv) < 2:
+        print("Usage: python full_recursive_download.py <URL>")
+        sys.exit(1)
+
+    test_url = sys.argv[1]
+    test_job_id = f"test-job-{uuid.uuid4()}"
+    test_params = {'url': test_url}
+
+    # Create a 'downloads' directory in the current path for test output
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    test_download_dir = os.path.join(script_dir, "downloads")
+
+    def print_result_to_console(job_id, result):
+        """A mock writer function that prints the result to the console."""
+        print(json.dumps(result, indent=2))
+
+    execute(test_job_id, test_params, test_download_dir, print_result_to_console)
