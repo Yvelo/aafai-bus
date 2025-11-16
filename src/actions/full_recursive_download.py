@@ -7,9 +7,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 import tempfile
 
-# --- Constants ---
-MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
-
 
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
@@ -20,9 +17,16 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-crash-reporter")
 
-    # Create a temporary directory for Chrome's user data
-    # This avoids permission issues in restricted environments like a web server.
+    # Create a single, persistent temporary directory for this driver instance.
+    # This directory will serve as the HOME directory for the Chrome process.
     temp_dir = tempfile.mkdtemp()
+
+    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process.
+    # This forces Chrome to write user-specific files (like .local) here,
+    # avoiding permission errors in /var/www.
+    os.environ['HOME'] = temp_dir
+
+    # Define paths within our new temporary HOME directory
     user_data_dir = os.path.join(temp_dir, "user-data")
     disk_cache_dir = os.path.join(temp_dir, "cache")
     crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
@@ -41,9 +45,9 @@ def _setup_driver(job_download_dir):
     service = Service(service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.set_page_load_timeout(60)  # Add a 60-second timeout for page loads
+    driver.set_page_load_timeout(60)
 
-    # Store the temporary directory path to be cleaned up later
+    # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
 
     return driver
