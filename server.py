@@ -13,7 +13,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
 # Add the project root to the Python path to ensure modules are found
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, PROJECT_ROOT)
 
 # --- Constants ---
 MAX_IDLE_TIME_IN_SECONDS = 1800
@@ -30,14 +31,15 @@ def create_app(testing=False):
     # --- App Configuration ---
     APP_ENV = os.environ.get('APP_ENV', 'development')
     if testing:
-        base_path = 'test_queues'
+        base_path = os.path.join(PROJECT_ROOT, 'test_queues')
     elif APP_ENV == 'production':
-        base_path = os.environ.get('QUEUE_BASE_PATH', 'prod_queues')
+        # In production, allow overriding via environment variable, but default to a subdir
+        base_path = os.environ.get('QUEUE_BASE_PATH', os.path.join(PROJECT_ROOT, 'prod_queues'))
     else:
-        base_path = 'dev_queues'
+        base_path = os.path.join(PROJECT_ROOT, 'dev_queues')
 
     app.config['BASE_QUEUE_PATH'] = base_path
-    app.config['DOWNLOAD_DIR'] = 'downloads'
+    app.config['DOWNLOAD_DIR'] = os.path.join(PROJECT_ROOT, 'downloads')
     app.config['ACTIONS_DIR'] = 'actions'
     app.config['TESTING'] = testing
 
@@ -47,7 +49,10 @@ def create_app(testing=False):
         logging.info(f"Using queue base path: '{current_app.config['BASE_QUEUE_PATH']}'")
         for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
             os.makedirs(os.path.join(current_app.config['BASE_QUEUE_PATH'], dir_name), exist_ok=True)
-        for dir_path in [current_app.config['DOWNLOAD_DIR'], 'static', 'templates', current_app.config['ACTIONS_DIR']]:
+        for dir_path in [current_app.config['DOWNLOAD_DIR'], 
+                         os.path.join(PROJECT_ROOT, 'static'), 
+                         os.path.join(PROJECT_ROOT, 'templates'), 
+                         os.path.join(PROJECT_ROOT, app.config['ACTIONS_DIR'])]:
             os.makedirs(dir_path, exist_ok=True)
         
         timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
@@ -92,7 +97,7 @@ def create_app(testing=False):
     return app
 
 # --- API and Logic (defined outside the factory) ---
-
+# ... (The rest of the functions remain unchanged)
 def receive_task():
     """Handles creating a new task from an inbound request."""
     data = request.get_json()
