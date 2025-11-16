@@ -24,15 +24,15 @@ The system is designed around a client-server model where the client is expected
 4.  **Process Task:** The server's background scheduler picks up the task from the queue, executes the requested action, and writes the result to an outbound file.
 5.  **Poll for Result:** The Apps Script sets up a time-based trigger to periodically call the server's `/outbound` endpoint with the `job_id`.
 6.  **Retrieve Result:** Once the task is complete, the `/outbound` endpoint returns the final JSON result.
-7.  **Auto-Shutdown:** After a configurable period of inactivity, the server initiates a graceful shutdown.
+7.  **Auto-Shutdown:** After a configurable period of inactivity and once all tasks are processed, the server initiates a full power-off of the VM.
 
 ## 3. Security Architecture
 
-To ensure that the `aafai-bus` server only accepts requests from trusted sources, it is critical to configure a firewall rule at the VPC level. This is the most secure way to protect the server, as it blocks unauthorized traffic before it even reaches the application.
+The server is secured using a two-pronged approach: a network firewall to block unauthorized requests and a specific `sudo` rule to allow the application to safely shut itself down.
 
-When the client is a Google Apps Script, we can restrict access to the specific IP ranges that Google uses for `UrlFetchApp` requests.
+### 3.1. Network Firewall (GCP)
 
-### Google Cloud Platform (GCP) Firewall Setup
+To ensure the server only accepts requests from trusted sources, we configure a firewall rule to allow traffic only from Google's IP ranges.
 
 1.  **Find Google's IP Ranges:** Run the following command to get the current IP ranges for Apps Script:
     ```sh
@@ -45,6 +45,17 @@ When the client is a Google Apps Script, we can restrict access to the specific 
     - **Protocols and ports:** `tcp:8000` (or your Gunicorn port).
 3.  **Tag Your VM:** Add the network tag (e.g., `aafai-bus-server`) to your VM instance in **Compute Engine**.
 
+### 3.2. Auto-Shutdown Permissions
+
+The application runs as the low-privileged `www-data` user. To allow it to power off the entire VM, you must grant it a specific, passwordless `sudo` permission.
+
+1.  **Edit the Sudoers File:** On your Debian server, run `sudo visudo`. This is the only safe way to edit this file.
+2.  **Add the Rule:** Scroll to the very bottom of the file and add this exact line:
+    ```
+    www-data ALL=(ALL) NOPASSWD: /sbin/shutdown --poweroff now
+    ```
+This highly specific rule allows the `www-data` user to do one thing and one thing only: power off the machine.
+
 ## 4. Testing Strategy
 
 The project includes a comprehensive test suite using `pytest`. The tests are organized to ensure reliability and maintainability.
@@ -55,24 +66,17 @@ pytest
 ```
 
 ### Unit Tests (`tests/unit/`)
-Unit tests are focused on testing individual functions and components in isolation. They use **mocks** to simulate the behavior of external dependencies (like network calls or file system access). This makes them extremely fast and reliable.
-
-- `test_actions.py`: Tests the logic of individual actions.
-- `test_scheduler.py`: Tests the scheduler's ability to handle bad input (e.g., malformed JSON, unknown actions).
-- `test_inbound_api.py` / `test_outbound_api.py`: Test the API endpoints' logic without making real HTTP requests.
+Unit tests are focused on testing individual functions and components in isolation. They use **mocks** to simulate the behavior of external dependencies.
 
 ### Functional & Integration Tests
-These tests verify that different parts of the system work together correctly.
-
-- `tests/functional/test_full_workflow.py`: A functional test that ensures the inbound API correctly writes a task file to the queue.
-- `tests/unit/test_download_website.py`: This contains a powerful **integration test** that starts a real, live HTTP server in the background and then runs the Selenium action against it. This provides high confidence that the browser automation works as expected without relying on a brittle external website.
+These tests verify that different parts of the system work together correctly. A key integration test starts a real, live HTTP server to test the Selenium action against a local, stable web page.
 
 ## 5. Features
 
 - **Dynamic Action System:** Add new capabilities by simply dropping a Python file into the `actions/` directory.
 - **File-Based Queue:** A simple, durable, and transparent queueing system.
 - **Asynchronous Processing:** Uses `APScheduler` with a thread pool to handle multiple tasks concurrently.
-- **On-Demand & Auto-Shutdown:** Designed to be started by a client and automatically shuts down when idle.
+- **On-Demand & Auto-Shutdown:** Designed to be started by a client and automatically powers off the VM when idle.
 - **Gunicorn & Systemd:** Ready for production deployment using industry-standard tools.
 
 ## 6. Setup & Deployment
@@ -117,4 +121,4 @@ This script can be added to a Google Sheet to:
 - Provide a custom menu to start tasks.
 - Automatically start the `aafai-bus` VM on Google Cloud.
 - Submit tasks and poll for results.
-- Display completion/failure notifications to the user.
+- Save the final text result to a file in the user's Google Drive.

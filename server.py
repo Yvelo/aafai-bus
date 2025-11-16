@@ -227,7 +227,7 @@ def process_inbound_queue(app):
 def check_idle_shutdown(app):
     """
     Checks if the server has been idle AND the inbound queue is empty.
-    If both conditions are met, it initiates a graceful shutdown via systemd.
+    If both conditions are met, it initiates a graceful VM shutdown.
     """
     with app.app_context():
         base_path = current_app.config['BASE_QUEUE_PATH']
@@ -248,11 +248,11 @@ def check_idle_shutdown(app):
             if idle_time > MAX_IDLE_TIME_IN_SECONDS:
                 logging.warning(
                     f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queue is empty. "
-                    "Initiating graceful shutdown via systemd."
+                    "Initiating VM power off."
                 )
-                # Use sudo to ask systemd to stop our own service.
+                # Use sudo to power off the machine.
                 # This requires a specific sudoers configuration to work without a password.
-                os.system('sudo systemctl stop aafai-bus.service')
+                os.system('sudo /sbin/shutdown --poweroff now')
 
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
