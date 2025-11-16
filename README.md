@@ -111,7 +111,9 @@ Polls for a task result.
 
 ## 9. Google Apps Script Integration
 
-An example client is provided in the `examples/` directory. This script can be added to a Google Sheet to:
+An example client implementation using Google Apps Script can be found here: [examples/google_apps_script/Code.gs](examples/google_apps_script/Code.gs).
+
+This script can be added to a Google Sheet to:
 - Provide a custom menu to start tasks.
 - Automatically start the `aafai-bus` VM on Google Cloud.
 - Submit tasks and poll for results.
