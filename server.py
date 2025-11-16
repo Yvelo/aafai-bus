@@ -13,16 +13,14 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 
 # --- Constants ---
 MAX_IDLE_TIME_IN_SECONDS = 300
+QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
     """Application factory for the Flask app."""
     app = Flask(__name__)
 
     # --- Logging Configuration ---
-    # Set the logging level based on the environment.
-    # In testing, we only want to see critical errors, not INFO or WARNING.
     log_level = logging.ERROR if testing else logging.INFO
-    # Use force=True to allow reconfiguration for each test run.
     logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s', force=True)
 
     # --- App Configuration ---
@@ -60,13 +58,18 @@ def create_app(testing=False):
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
         scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5, id='process_queue')
         scheduler.add_job(func=check_idle_shutdown, args=[app], trigger='interval', seconds=30, id='idle_check')
+        scheduler.add_job(func=purge_old_files, args=[app], trigger='cron', hour=3, id='purge_old_files')
         atexit.register(lambda: scheduler.shutdown())
         scheduler.start()
-        logging.info("Scheduler started with idle check enabled.")
+        logging.info("Scheduler started with idle check and daily purge enabled.")
 
     # --- Register Routes ---
     @app.route('/inbound', methods=['POST'])
     def inbound_route():
+        # Update activity timestamp only on inbound requests
+        timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+        with open(timestamp_file, 'w') as f:
+            f.write(str(time.time()))
         return receive_task()
 
     @app.route('/outbound', methods=['GET'])
@@ -83,10 +86,6 @@ def create_app(testing=False):
 
 def receive_task():
     """Handles creating a new task from an inbound request."""
-    timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
-    with open(timestamp_file, 'w') as f:
-        f.write(str(time.time()))
-
     data = request.get_json()
     if not data or 'action' not in data:
         return jsonify({'status': 'error', 'message': 'Invalid request'}), 400
@@ -221,23 +220,79 @@ def process_inbound_queue(app):
             shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
 
 def check_idle_shutdown(app):
-    """Checks for server idleness and shuts down if necessary."""
+    """
+    Checks if the server has been idle AND the inbound queue is empty.
+    If both conditions are met, it initiates a graceful shutdown.
+    """
     with app.app_context():
-        timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+        base_path = current_app.config['BASE_QUEUE_PATH']
+        inbound_queue_dir = os.path.join(base_path, 'inbound')
+        timestamp_file = os.path.join(base_path, 'last_api_call.timestamp')
+
+        if os.path.exists(inbound_queue_dir) and os.listdir(inbound_queue_dir):
+            logging.info("Idle check: Inbound queue is not empty. Deferring shutdown.")
+            return
+
         try:
             with open(timestamp_file, 'r') as f:
                 last_api_call_time = float(f.read().strip())
             
             idle_time = time.time() - last_api_call_time
-            logging.info(f"Server idle check: Last API call was {idle_time:.2f} seconds ago.")
+            logging.info(f"Idle check: Queue is empty. Last inbound call was {idle_time:.2f} seconds ago.")
 
             if idle_time > MAX_IDLE_TIME_IN_SECONDS:
-                logging.warning(f"Server idle, initiating graceful shutdown.")
+                logging.warning(
+                    f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queue is empty. "
+                    "Initiating graceful shutdown."
+                )
                 master_pid = os.getppid()
                 logging.info(f"Sending SIGTERM to Gunicorn master process (PID: {master_pid}).")
                 os.kill(master_pid, signal.SIGTERM)
+
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
+
+def purge_old_files(app):
+    """
+    Scheduled job to delete files and directories older than QUEUE_PEREMPTION_DAYS.
+    """
+    with app.app_context():
+        logging.info("Daily purge job started.")
+        base_path = current_app.config['BASE_QUEUE_PATH']
+        download_dir = current_app.config['DOWNLOAD_DIR']
+        
+        cutoff = time.time() - (QUEUE_PEREMPTION_DAYS * 24 * 60 * 60)
+        
+        dirs_to_purge = [
+            os.path.join(base_path, 'inbound'),
+            os.path.join(base_path, 'outbound'),
+            os.path.join(base_path, 'consumed'),
+            os.path.join(base_path, 'failed'),
+            download_dir
+        ]
+
+        for directory in dirs_to_purge:
+            if not os.path.exists(directory):
+                continue
+            
+            logging.info(f"Purging old files from: {directory}")
+            for item_name in os.listdir(directory):
+                item_path = os.path.join(directory, item_name)
+                try:
+                    item_mod_time = os.path.getmtime(item_path)
+                    if item_mod_time < cutoff:
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            logging.info(f"Removed old directory: {item_path}")
+                        else:
+                            os.remove(item_path)
+                            logging.info(f"Removed old file: {item_path}")
+                except FileNotFoundError:
+                    logging.warning(f"Could not find {item_path} during purge; it may have been deleted already.")
+                except Exception as e:
+                    logging.error(f"Error purging {item_path}: {e}", exc_info=True)
+        
+        logging.info("Daily purge job finished.")
 
 # This block is now only used for local development.
 if __name__ == '__main__':

@@ -18,7 +18,7 @@ const BOOT_DELAY_SECONDS = 3; // Time to wait for the server to initialize after
  */
 function onOpen() {
   SpreadsheetApp.getUi()
-      .createMenu('AAF-Bus')
+      .createMenu('aafai-bus')
       .addItem('Run Full Recursive Download', 'startAsyncTask')
       .addSeparator()
       .addItem('Set Service Account Key', 'setServiceAccountKey')
@@ -27,7 +27,6 @@ function onOpen() {
 
 /**
  * Ensures the VM is running before executing a callback function.
- * This function acts as a gatekeeper for any action that requires the server.
  * @param {function} callback The function to execute after ensuring the VM is running.
  */
 function ensureVmIsRunning(callback) {
@@ -112,7 +111,6 @@ function deleteTriggers(functionName) {
 
 /**
  * Configures and returns an OAuth2 service for GCP using a service account.
- * This uses the OAuth2 for Apps Script library.
  * @return {object | null} The configured OAuth2 service or null if key is missing.
  */
 function getGcpService() {
@@ -127,22 +125,18 @@ function getGcpService() {
         .setIssuer(serviceAccountKey.client_email)
         .setSubject(serviceAccountKey.client_email)
         .setPropertyStore(PropertiesService.getScriptProperties())
-        .setScope('https://www.googleapis.com/auth/cloud-platform');
+        .setScope('https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/drive');
 }
 
 /**
  * Starts a long-running task by sending it to the Python server.
- * It ensures the server is running and then initiates a polling mechanism.
  */
 function startAsyncTask() {
   ensureVmIsRunning(() => {
-    const action = 'full_recursive_download';
-    const params = {
-      'url': 'http://info.cern.ch' // Example website to download
-    };
+    const urlToDownload = 'http://info.cern.ch'; // Example website
     const payload = {
-      action: action,
-      params: params
+      action: 'full_recursive_download',
+      params: { 'url': urlToDownload }
     };
     const options = {
       'method': 'post',
@@ -159,14 +153,16 @@ function startAsyncTask() {
         Logger.log(`Task successfully submitted. Job ID: ${jobId}`);
         SpreadsheetApp.getActiveSpreadsheet().toast(`Task submitted! Job ID: ${jobId}`, 'Success', 5);
 
-        // Store the job ID and set up a polling trigger
-        PropertiesService.getScriptProperties().setProperty('currentJobId', jobId);
+        // Store both job ID and URL for later use
+        const jobData = { jobId: jobId, url: urlToDownload };
+        PropertiesService.getScriptProperties().setProperty('currentJobData', JSON.stringify(jobData));
+        
         deleteTriggers('pollForResult');
         ScriptApp.newTrigger('pollForResult')
           .timeBased()
           .everyMinutes(1)
           .create();
-        Logger.log('Polling trigger created. Waiting for the server to process the task...');
+        Logger.log('Polling trigger created.');
       } else {
         Logger.log(`Failed to submit task. Server response: ${response.getContentText()}`);
         SpreadsheetApp.getActiveSpreadsheet().toast('Failed to submit task.', 'Error', 5);
@@ -179,16 +175,18 @@ function startAsyncTask() {
 }
 
 /**
- * Polls the outbound queue for the result of a submitted job.
- * This function is intended to be run by a time-based trigger.
+ * Polls the outbound queue for the result and saves it to Google Drive on completion.
  */
 function pollForResult() {
-  const jobId = PropertiesService.getScriptProperties().getProperty('currentJobId');
-  if (!jobId) {
-    Logger.log('No active job ID found. Stopping polling.');
+  const jobDataString = PropertiesService.getScriptProperties().getProperty('currentJobData');
+  if (!jobDataString) {
+    Logger.log('No active job data found. Stopping polling.');
     deleteTriggers('pollForResult');
     return;
   }
+
+  const jobData = JSON.parse(jobDataString);
+  const { jobId, url: originalUrl } = jobData;
 
   Logger.log(`Polling for result of Job ID: ${jobId}`);
   const url = `${SERVER_BASE_URL}/outbound?job_id=${encodeURIComponent(jobId)}`;
@@ -203,24 +201,32 @@ function pollForResult() {
 
     if (result.status === 'complete') {
       Logger.log('--- JOB COMPLETE ---');
-      // The result from the Selenium action is an object
-      const taskResult = result.result; 
-      Logger.log(`Text Size: ${taskResult.size_bytes} bytes`);
-      if(taskResult.warning) {
-        Logger.log(`Warning: ${taskResult.warning}`);
-      }
-      // For demonstration, we'll just log the first 500 chars of the text
-      Logger.log(`Extracted Text (first 500 chars): ${taskResult.text.substring(0, 500)}`);
+      const taskResult = result.result;
       
-      SpreadsheetApp.getActiveSpreadsheet().toast('Task completed successfully!', 'Status', 5);
-      PropertiesService.getScriptProperties().deleteProperty('currentJobId');
+      // Format the date and create the filename
+      const dateString = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
+      const filename = `${dateString} Full download [${originalUrl}].txt`;
+      
+      // Create the file in the user's Google Drive
+      const file = DriveApp.createFile(filename, taskResult.text, MimeType.PLAIN_TEXT);
+      Logger.log(`Result saved to Google Drive: ${file.getName()} (ID: ${file.getId()})`);
+      
+      let toastMessage = `Task complete! File saved as "${filename}"`;
+      if (taskResult.warning) {
+        Logger.log(`Warning: ${taskResult.warning}`);
+        toastMessage += ` (Warning: Text was truncated)`;
+      }
+      SpreadsheetApp.getActiveSpreadsheet().toast(toastMessage, 'Status', 10);
+      
+      // Clean up properties and triggers
+      PropertiesService.getScriptProperties().deleteProperty('currentJobData');
       deleteTriggers('pollForResult');
 
     } else if (result.status === 'failed') {
       Logger.log('--- JOB FAILED ---');
       Logger.log(`Error message: ${result.error}`);
-      SpreadsheetApp.getActiveSpreadsheet().toast(`Task failed: ${result.error}`, 'Status', 5);
-      PropertiesService.getScriptProperties().deleteProperty('currentJobId');
+      SpreadsheetApp.getActiveSpreadsheet().toast(`Task failed: ${result.error}`, 'Status', 10);
+      PropertiesService.getScriptProperties().deleteProperty('currentJobData');
       deleteTriggers('pollForResult');
     } else {
       Logger.log('Job is still pending. Will check again later.');
@@ -231,8 +237,7 @@ function pollForResult() {
 }
 
 /**
- * Prompts the user to set the Service Account Key via a dialog box.
- * The key is stored in UserProperties, specific to the user and the script.
+ * Prompts the user to set the Service Account Key.
  */
 function setServiceAccountKey() {
   const ui = SpreadsheetApp.getUi();
@@ -241,11 +246,11 @@ function setServiceAccountKey() {
     const serviceAccountKey = response.getResponseText().trim();
     if (serviceAccountKey) {
       try {
-        JSON.parse(serviceAccountKey); // Validate that the input is valid JSON
+        JSON.parse(serviceAccountKey);
         PropertiesService.getUserProperties().setProperty(SERVICE_ACCOUNT_KEY_PROPERTY, serviceAccountKey);
         ui.alert('Success', 'Service Account Key has been set for this user.', ui.ButtonSet.OK);
       } catch (e) {
-        ui.alert('Error', 'Invalid JSON format. Please enter a valid Service Account Key.', ui.ButtonSet.OK);
+        ui.alert('Error', 'Invalid JSON format.', ui.ButtonSet.OK);
       }
     } else {
       ui.alert('Cancelled', 'No Service Account Key was entered.', ui.ButtonSet.OK);
@@ -254,15 +259,15 @@ function setServiceAccountKey() {
 }
 
 /**
- * Retrieves the Service Account Key from UserProperties.
- * @return {object | null} The parsed Service Account Key JSON object or null if not set.
+ * Retrieves the Service Account Key.
+ * @return {object | null} The parsed Service Account Key JSON object.
  */
 function getServiceAccountKey() {
   const userProperties = PropertiesService.getUserProperties();
   const serviceAccountKeyJSON = userProperties.getProperty(SERVICE_ACCOUNT_KEY_PROPERTY);
 
   if (!serviceAccountKeyJSON) {
-    SpreadsheetApp.getUi().alert('Service Account Key is not set. Please use the "AAF-Bus > Set Service Account Key" menu to set it.');
+    SpreadsheetApp.getUi().alert('Service Account Key is not set. Please use the "aafai-bus > Set Service Account Key" menu to set it.');
     return null;
   }
   return JSON.parse(serviceAccountKeyJSON);
