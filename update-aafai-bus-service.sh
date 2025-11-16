@@ -9,7 +9,7 @@ cd /var/www/aafai-bus
 # 2. Pull the latest code as the 'www-data' user
 # This assumes you have set up deploy keys for www-data (Solution 2 from our chat)
 echo "Pulling latest code from repository..."
-sudo -u www-data git pull
+sudo -u www-data git reset --hard origin/master
 
 echo "Code successfully updated."
 
