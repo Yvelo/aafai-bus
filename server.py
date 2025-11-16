@@ -51,17 +51,22 @@ def create_app(testing=False):
             with open(timestamp_file, 'w') as f:
                 f.write(str(time.time()))
 
-    # --- Scheduler ---
+    # --- Scheduler & Startup Jobs ---
     if not testing:
+        # Run purge job immediately on startup
+        logging.info("Running purge job on startup...")
+        purge_old_files(app)
+
+        # Configure and start the scheduler for recurring jobs
         executors = {'default': ThreadPoolExecutor(5)}
         job_defaults = {'coalesce': False, 'max_instances': 5}
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
         scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5, id='process_queue')
         scheduler.add_job(func=check_idle_shutdown, args=[app], trigger='interval', seconds=30, id='idle_check')
-        scheduler.add_job(func=purge_old_files, args=[app], trigger='cron', hour=3, id='purge_old_files')
+        scheduler.add_job(func=purge_old_files, args=[app], trigger='cron', hour=3, id='purge_old_files_daily')
         atexit.register(lambda: scheduler.shutdown())
         scheduler.start()
-        logging.info("Scheduler started with idle check and daily purge enabled.")
+        logging.info("Scheduler started with recurring jobs enabled.")
 
     # --- Register Routes ---
     @app.route('/inbound', methods=['POST'])
@@ -254,10 +259,10 @@ def check_idle_shutdown(app):
 
 def purge_old_files(app):
     """
-    Scheduled job to delete files and directories older than QUEUE_PEREMPTION_DAYS.
+    Deletes files and directories older than QUEUE_PEREMPTION_DAYS.
     """
     with app.app_context():
-        logging.info("Daily purge job started.")
+        logging.info("Purge job started.")
         base_path = current_app.config['BASE_QUEUE_PATH']
         download_dir = current_app.config['DOWNLOAD_DIR']
         
@@ -292,7 +297,7 @@ def purge_old_files(app):
                 except Exception as e:
                     logging.error(f"Error purging {item_path}: {e}", exc_info=True)
         
-        logging.info("Daily purge job finished.")
+        logging.info("Purge job finished.")
 
 # This block is now only used for local development.
 if __name__ == '__main__':
