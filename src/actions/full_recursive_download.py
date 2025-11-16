@@ -8,6 +8,9 @@ from selenium.webdriver.chrome.service import Service
 import tempfile
 
 
+MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
     chrome_options = Options()
