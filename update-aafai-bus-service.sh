@@ -10,6 +10,7 @@ cd /var/www/aafai-bus
 # This assumes you have set up deploy keys for www-data (Solution 2 from our chat)
 echo "Pulling latest code from repository..."
 sudo -u www-data git reset --hard origin/master
+sudo chmod +x /var/www/aafai-bus/update-aafai-bus-service.sh
 
 echo "Code successfully updated."
 
