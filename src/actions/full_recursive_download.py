@@ -10,6 +10,38 @@ import json # Import json for pretty printing
 # --- Constants ---
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
+def _setup_driver(job_download_dir):
+    """Configures and returns a headless Chrome WebDriver instance."""
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-crash-reporter")
+
+    # Isolate session data for this specific job
+    user_data_dir = os.path.join(job_download_dir, "user-data")
+    disk_cache_dir = os.path.join(job_download_dir, "cache")
+    crash_dumps_dir = os.path.join(job_download_dir, "crash-dumps")
+    os.makedirs(crash_dumps_dir, exist_ok=True)
+
+    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+    chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
+    chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
+
+    # Isolate Selenium Manager's driver cache
+    selenium_manager_cache_dir = os.path.join(job_download_dir, "selenium_manager_cache")
+    os.makedirs(selenium_manager_cache_dir, exist_ok=True)
+    os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
+
+    # Enable verbose logging for chromedriver
+    chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
+    service = Service(service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    driver.set_page_load_timeout(60)  # Add a 60-second timeout for page loads
+    return driver
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Uses a headless browser to navigate to a URL, extract all visible text,
@@ -23,32 +55,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     job_download_dir = os.path.join(download_dir, job_id)
     os.makedirs(job_download_dir, exist_ok=True)
 
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-crash-reporter") # Add this line
-
-    # Set user data and other cache directories to be inside the job-specific download_dir
-    user_data_dir = os.path.join(job_download_dir, "user-data")
-    disk_cache_dir = os.path.join(job_download_dir, "cache")
-    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-    chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
-
-    # Ensure the cache directory for Selenium Manager exists and is writable
-    selenium_manager_cache_dir = os.path.join(job_download_dir, "selenium_manager_cache")
-    os.makedirs(selenium_manager_cache_dir, exist_ok=True)
-    
-    os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
-    
-    # Enable verbose logging for chromedriver by passing the argument directly
-    chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
-
     driver = None
     try:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = _setup_driver(job_download_dir)
+
         logging.info(f"Navigating to URL: {url}")
         driver.get(url)
 
