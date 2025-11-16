@@ -1,5 +1,11 @@
 # startup_purge.py
+import os
+import sys
 import logging
+
+# Add the project root to the Python path to ensure 'server' can be imported
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 from server import create_app, purge_old_files
 
 # Configure logging to see output in systemd logs
