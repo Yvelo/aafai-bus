@@ -41,7 +41,7 @@ function ensureVmIsRunning(callback) {
   } else {
     Logger.log(`VM is already running.`);
   }
-  
+
   callback();
 }
 
@@ -87,7 +87,7 @@ function getVmDetails() {
     },
     muteHttpExceptions: true
   };
-  
+
   const response = UrlFetchApp.fetch(url, options);
   if (response.getResponseCode() === 200) {
     return JSON.parse(response.getContentText());
@@ -136,7 +136,7 @@ function startAsyncTask() {
     const urlToDownload = 'http://info.cern.ch'; // Example website
     const payload = {
       action: 'full_recursive_download',
-      params: { 'url': urlToDownload }
+      params: { 'url': urlToDownload, 'depth': 1 }
     };
     const options = {
       'method': 'post',
@@ -156,7 +156,7 @@ function startAsyncTask() {
         // Store both job ID and URL for later use
         const jobData = { jobId: jobId, url: urlToDownload };
         PropertiesService.getScriptProperties().setProperty('currentJobData', JSON.stringify(jobData));
-        
+
         deleteTriggers('pollForResult');
         ScriptApp.newTrigger('pollForResult')
           .timeBased()
@@ -202,22 +202,22 @@ function pollForResult() {
     if (result.status === 'complete') {
       Logger.log('--- JOB COMPLETE ---');
       const taskResult = result.result;
-      
+
       // Format the date and create the filename
       const dateString = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
-      const filename = `${dateString} Full download [${originalUrl}].txt`;
-      
+      const filename = `${dateString} Full download ${originalUrl}.txt`;
+
       // Create the file in the user's Google Drive
       const file = DriveApp.createFile(filename, taskResult.text, MimeType.PLAIN_TEXT);
       Logger.log(`Result saved to Google Drive: ${file.getName()} (ID: ${file.getId()})`);
-      
+
       let toastMessage = `Task complete! File saved as "${filename}"`;
       if (taskResult.warning) {
         Logger.log(`Warning: ${taskResult.warning}`);
         toastMessage += ` (Warning: Text was truncated)`;
       }
       SpreadsheetApp.getActiveSpreadsheet().toast(toastMessage, 'Status', 10);
-      
+
       // Clean up properties and triggers
       PropertiesService.getScriptProperties().deleteProperty('currentJobData');
       deleteTriggers('pollForResult');

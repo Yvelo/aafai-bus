@@ -85,7 +85,30 @@ These tests verify that different parts of the system work together correctly. A
 1.  Clone the repository.
 2.  Create and activate a virtual environment: `python -m venv .venv` & `source .venv/bin/activate`.
 3.  Install dependencies: `pip install -r requirements.txt`.
-4.  Install a Selenium WebDriver (e.g., `chromedriver`) and ensure it is in your system's PATH.
+4.  Selenium WebDriver is automatically managed by `selenium-manager`. However, you need to ensure that a compatible browser (like Google Chrome or Chromium) is installed on your system.
+
+### Selenium and Headless Chrome Configuration
+
+The `full_recursive_download` action utilizes Selenium with a headless Chrome browser for web crawling. This section outlines important considerations for its setup and operation.
+
+#### Headless Chrome Dependencies
+For the headless Chrome browser to function correctly in a Linux environment (such as a Debian-based VM), you need to install the browser itself and its common dependencies.
+
+```sh
+sudo apt-get update
+sudo apt-get install -y google-chrome-stable # Or chromium-browser
+sudo apt-get install -y fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libgcc1 libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxrender1 libxss1 libxtst6 lsb-release wget xdg-utils
+```
+
+#### Selenium Manager and Driver Cache
+Selenium Manager (included with the `selenium` Python package) automatically downloads and manages the correct WebDriver binary (e.g., `chromedriver`) for your installed browser.
+
+-   **`SE_CACHE_PATH`**: The `full_recursive_download` action sets the `SE_CACHE_PATH` environment variable to a job-specific temporary directory (`job_download_dir/selenium_manager_cache`). This ensures that each job uses its own isolated driver cache, preventing conflicts and allowing for proper cleanup.
+
+#### Chrome User Data and `HOME` Environment Variable
+Headless Chrome often attempts to write user-specific data (like profiles, caches, and crash dumps) to the user's home directory. When running as a low-privileged user (e.g., `www-data`), this can lead to permission errors if the default `HOME` directory is not writable.
+
+-   **`HOME`**: The `_setup_driver` function in `full_recursive_download.py` explicitly sets the `HOME` environment variable to a temporary directory created for the driver instance. This forces Chrome to store all its user-specific files within this temporary, writable location, resolving potential permission issues. This temporary directory is cleaned up after the driver quits.
 
 ### Production Deployment (Linux)
 1.  Copy the `aafai-bus.service` file to `/etc/systemd/system/`.
