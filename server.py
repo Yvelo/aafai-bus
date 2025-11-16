@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import uuid
 import time
@@ -11,8 +12,11 @@ from flask import Flask, request, jsonify, render_template, current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 
+# Add the project root to the Python path to ensure modules are found
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 # --- Constants ---
-MAX_IDLE_TIME_IN_SECONDS = 1800
+MAX_IDLE_TIME_IN_SECONDS = 300
 QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
