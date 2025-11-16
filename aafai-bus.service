@@ -13,8 +13,10 @@ Group=www-data
 # Set the working directory to your app's root
 WorkingDirectory=/var/www/aafai-bus
 
+# Run the purge script once before starting the main server
+ExecStartPre=/var/www/aafai-bus/venv/bin/python /var/www/aafai-bus/startup_purge.py
+
 # Command to start the app using Gunicorn and the application factory
-# The 'server:create_app()' part means "in server.py, call the function create_app()"
 ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 "server:create_app()"
 
 # Restart the service if it ever fails

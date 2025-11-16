@@ -51,13 +51,8 @@ def create_app(testing=False):
             with open(timestamp_file, 'w') as f:
                 f.write(str(time.time()))
 
-    # --- Scheduler & Startup Jobs ---
+    # --- Scheduler ---
     if not testing:
-        # Run purge job immediately on startup
-        logging.info("Running purge job on startup...")
-        purge_old_files(app)
-
-        # Configure and start the scheduler for recurring jobs
         executors = {'default': ThreadPoolExecutor(5)}
         job_defaults = {'coalesce': False, 'max_instances': 5}
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
