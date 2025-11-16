@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 # Environment variables for the application
-Environment="APP_ENV=production" "QUEUE_BASE_PATH=/var/www/aafai-bus/data"
+Environment="APP_ENV=production" "QUEUE_BASE_PATH=/var/www/aafai-bus/data" "PYTHONPATH=/var/www/aafai-bus"
 
 # Run the service as the 'www-data' user
 User=www-data
