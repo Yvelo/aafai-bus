@@ -5,3 +5,5 @@
 /.venv/pyvenv.cfg
 /data/downloads/test-job-success/index.html
 /downloads/test-job-success/index.html
+/downloads/
+/data/

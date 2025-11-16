@@ -33,17 +33,16 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     selenium_manager_cache_dir = os.path.join(download_dir, "selenium_manager_cache")
     os.makedirs(selenium_manager_cache_dir, exist_ok=True)
     
-    # Pass the cache path to Selenium Manager via the Service object's environment.
-    # We must copy the existing environment to ensure PATH is preserved.
-    service_env = os.environ.copy()
-    service_env['SE_CACHE_PATH'] = selenium_manager_cache_dir
+    # Set the SE_CACHE_PATH environment variable for the current process.
+    # This will be inherited by Selenium Manager.
+    os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
     
-    service = Service(env=service_env)
+    service = Service()
 
     driver = None
     try:
-        # The Service object will now correctly configure Selenium Manager
-        # to download and cache the driver in our specified writable directory.
+        # Selenium Manager will now use the directory specified in SE_CACHE_PATH
+        # to download and cache the driver.
         driver = webdriver.Chrome(service=service, options=chrome_options)
         logging.info(f"Navigating to URL: {url}")
         driver.get(url)
