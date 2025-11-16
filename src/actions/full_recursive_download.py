@@ -5,10 +5,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-import json # Import json for pretty printing
+import tempfile
 
 # --- Constants ---
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
 
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
@@ -19,11 +20,12 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-crash-reporter")
 
-    # Isolate session data for this specific job
-    user_data_dir = os.path.join(job_download_dir, "user-data")
-    disk_cache_dir = os.path.join(job_download_dir, "cache")
-    crash_dumps_dir = os.path.join(job_download_dir, "crash-dumps")
-    os.makedirs(crash_dumps_dir, exist_ok=True)
+    # Create a temporary directory for Chrome's user data
+    # This avoids permission issues in restricted environments like a web server.
+    temp_dir = tempfile.mkdtemp()
+    user_data_dir = os.path.join(temp_dir, "user-data")
+    disk_cache_dir = os.path.join(temp_dir, "cache")
+    crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
 
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
@@ -40,7 +42,12 @@ def _setup_driver(job_download_dir):
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(60)  # Add a 60-second timeout for page loads
+
+    # Store the temporary directory path to be cleaned up later
+    driver.temp_dir = temp_dir
+
     return driver
+
 
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
@@ -87,11 +94,15 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     except Exception as e:
         logging.error(f"An error occurred during Selenium execution for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
-    
+
     finally:
         if driver:
+            # Clean up the temporary directory
+            if hasattr(driver, 'temp_dir'):
+                shutil.rmtree(driver.temp_dir)
             driver.quit()
-        # Optionally, you might want to remove the job-specific directory after completion
+        # It's still a good practice to clean up the job-specific directory.
+        # However, it's commented out in the original script, so we'll respect that.
         # shutil.rmtree(job_download_dir)
 
     write_result_to_outbound(job_id, result)
@@ -99,25 +110,28 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
 if __name__ == '__main__':
     # This block allows the script to be run directly for testing purposes.
-    # Example: python full_recursive_download.py "https://www.google.com"
+    # Example: python your_script_name.py "https://www.google.com"
     import sys
     import uuid
+    import json
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     if len(sys.argv) < 2:
-        print("Usage: python full_recursive_download.py <URL>")
+        print("Usage: python your_script_name.py <URL>")
         sys.exit(1)
 
     test_url = sys.argv[1]
     test_job_id = f"test-job-{uuid.uuid4()}"
     test_params = {'url': test_url}
 
-    # Use a temporary directory for test output to avoid permission issues on servers.
-    test_download_dir = os.path.join("/tmp", "aafai-bus-downloads")
+    # Use a standard temporary directory for test output
+    test_download_dir = tempfile.gettempdir()
+
 
     def print_result_to_console(job_id, result):
         """A mock writer function that prints the result to the console."""
         print(json.dumps(result, indent=2))
+
 
     execute(test_job_id, test_params, test_download_dir, print_result_to_console)
