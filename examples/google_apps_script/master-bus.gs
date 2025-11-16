@@ -11,7 +11,7 @@ const GCP_PROJECT_ID = 'startup-scraping';
 const VM_ZONE = 'europe-west1-d';
 const VM_INSTANCE_NAME = 'aafai-bus';
 const SERVER_BASE_URL = 'http://34.79.110.150:8000';
-const BOOT_DELAY_SECONDS = 3; // Time to wait for the server to initialize after the VM starts
+const BOOT_DELAY_SECONDS = 10; // Time to wait for the server to initialize after the VM starts
 
 /**
  * Adds a custom menu to the spreadsheet when it's opened.

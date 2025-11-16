@@ -66,9 +66,14 @@ def test_execute_download_success_with_static_server(static_file_server, app):
     assert result_data['job_id'] == job_id
     
     result = result_data['result']
-    assert result['text'] == expected_text
-    assert result['warning'] is None
-    assert result['size_bytes'] == len(expected_text.encode('utf-8'))
+    assert 'crawled_pages' in result
+    assert len(result['crawled_pages']) == 1
+    
+    crawled_page = result['crawled_pages'][0]
+    assert crawled_page['url'] == url
+    assert crawled_page['text'] == expected_text
+    assert crawled_page['warning'] is None
+    assert crawled_page['size_bytes'] == len(expected_text.encode('utf-8'))
 
 
 def test_execute_download_selenium_failure(app):
