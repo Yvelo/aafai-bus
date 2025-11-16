@@ -1,40 +1,63 @@
-import os
-import time
-import requests
-from bs4 import BeautifulSoup
+import logging
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+
+# --- Constants ---
+MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
-    Downloads a website recursively.
-
-    Args:
-        job_id (str): The ID of the job.
-        params (dict): A dictionary of parameters for the action.
-                       Expected to contain a 'url' key.
-        download_dir (str): The base directory for downloads.
-        write_result_to_outbound (function): A function to write the result to the outbound queue.
+    Uses a headless browser to navigate to a URL, extract all visible text,
+    and return it in the outbound JSON message.
     """
     url = params.get('url')
     if not url:
+        # This is a programming error, the scheduler should catch it.
         raise ValueError("'url' parameter is missing for 'full_recursive_download'")
 
-    download_path = os.path.join(download_dir, job_id)
-
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    driver = None
     try:
-        os.makedirs(download_path, exist_ok=True)
-        response = requests.get(url, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        file_path = os.path.join(download_path, 'index.html')
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(soup.prettify())
-        # Simulating a long-running job
-        time.sleep(5)
+        driver = webdriver.Chrome(options=chrome_options)
+        logging.info(f"Navigating to URL: {url}")
+        driver.get(url)
+
+        # Extract text from the body of the page
+        body_text = driver.find_element(By.TAG_NAME, 'body').text
+        logging.info(f"Successfully extracted text from {url}")
+
+        text_bytes = body_text.encode('utf-8')
+        text_size = len(text_bytes)
+        warning = None
+
+        # Check if the text exceeds the maximum size
+        if text_size > MAXIMUM_DOWNLOAD_SIZE:
+            warning = f"Text content exceeded {MAXIMUM_DOWNLOAD_SIZE} bytes and was truncated."
+            logging.warning(f"For job {job_id}, {warning}")
+            # Truncate the text to the maximum allowed size
+            body_text = text_bytes[:MAXIMUM_DOWNLOAD_SIZE].decode('utf-8', errors='ignore')
+
         result = {
             'job_id': job_id,
             'status': 'complete',
-            'result': f'Successfully downloaded content from {url} to {download_path}'
+            'result': {
+                'text': body_text,
+                'size_bytes': text_size,
+                'warning': warning
+            }
         }
+
     except Exception as e:
+        logging.error(f"An error occurred during Selenium execution for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+    
+    finally:
+        if driver:
+            driver.quit()
 
     write_result_to_outbound(job_id, result)
