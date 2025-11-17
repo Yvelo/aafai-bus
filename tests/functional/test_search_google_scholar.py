@@ -412,7 +412,7 @@ class TestSearchGoogleScholarFunctional:
             "review_articles_only": True  # This should be ignored
         }
         url = _build_scholar_url(query_params, start_index=10)
-        assert "q=machine+learning" in url
+        assert "as_q=machine+learning" in url
         assert "as_epq=reinforcement+learning" in url
         assert "as_oq=AI+OR+neural+networks" in url
         assert "as_eq=robotics" in url
@@ -432,8 +432,8 @@ class TestSearchGoogleScholarFunctional:
             "exact_phrase": "large language models"
         }
         url = _build_scholar_url(query_params)
-        assert 'q=%22large+language+models%22' in url  # Exact phrase should be in 'q' with quotes
-        assert "as_epq" not in url  # Should not be in as_epq if q is not already set
+        assert "as_epq=large+language+models" in url
+        assert "as_q=" in url and "as_q=large" not in url
 
     def test_build_scholar_url_empty_query(self, mock_get_total_estimated_results):
         """
@@ -441,4 +441,5 @@ class TestSearchGoogleScholarFunctional:
         """
         query_params = {}
         url = _build_scholar_url(query_params)
-        assert url == "https://scholar.google.com/scholar?hl=en"
+        expected_url = "https://scholar.google.com/scholar?as_q=&as_epq=&as_oq=&as_eq=&as_occt=any&as_sauthors=&as_publication=&as_ylo=&as_yhi=&hl=en&as_sdt=0%2C5"
+        assert url == expected_url
