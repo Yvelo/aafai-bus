@@ -133,6 +133,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     if not initial_url:
         raise ValueError("'url' parameter is missing for 'full_recursive_download'")
 
+    # Ensure the URL has a scheme.
+    if not urlparse(initial_url).scheme:
+        initial_url = 'https://' + initial_url
+
     # Canonicalize the initial URL
     initial_url = _canonicalize_url(initial_url)
 
