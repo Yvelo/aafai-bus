@@ -78,7 +78,7 @@ These tests verify that different parts of the system work together correctly. A
 - **Asynchronous Processing:** Uses `APScheduler` with a thread pool to handle multiple tasks concurrently.
 - **On-Demand & Auto-Shutdown:** Designed to be started by a client and automatically powers off the VM when idle.
 - **Gunicorn & Systemd:** Ready for production deployment using industry-standard tools.
-- **Google Scholar Search (`search_google_scholar`):** A new action that performs advanced searches on Google Scholar. It scrapes article details including title, link, snippet, authors (with links to their Scholar profiles, organization, and citation counts where available), publication details, and PDF links. It supports various search parameters (all words, exact phrase, author, publication, date range) and handles pagination up to a configurable maximum number of articles.
+- **Google Scholar Search (`search_google_scholar`):** A new action that performs advanced searches on Google Scholar. It scrapes article details including title, link, snippet, authors (with links to their Scholar profiles, organization, and citation counts where available), publication details, and PDF links. It supports various search parameters (all words, exact phrase, author, publication, date range) and handles pagination up to a configurable maximum number of articles. The author matching logic is designed to be flexible, correctly identifying authors even when names are abbreviated (e.g., a search for "Richard Handler" will correctly match with "R Handler").
 
 ## 6. Setup & Deployment
 

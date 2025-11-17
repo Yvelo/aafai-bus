@@ -75,64 +75,31 @@ def _setup_driver(job_download_dir):
 
 def _build_scholar_url(query_params, start_index=0):
     """
-    Builds a Google Scholar search URL from the given query parameters.
-    Maps our internal params to Google Scholar's URL parameters.
+    Builds a Google Scholar search URL from the given query parameters using the advanced search syntax.
     """
-    scholar_params = {}
-
-    # Map our query parameters to Google Scholar's URL parameters
-    if query_params.get("all_words"):
-        scholar_params["q"] = query_params["all_words"]
-    
-    # Google Scholar uses intitle: for exact phrase in title, but for general exact phrase,
-    # it's usually handled by quotes in the main 'q' parameter or a separate 'as_epq'
-    # For simplicity, let's combine with 'q' using quotes if 'q' is not already set.
-    # If 'q' is set, we'll use 'as_epq'
-    if query_params.get("exact_phrase"):
-        if "q" in scholar_params:
-            scholar_params["as_epq"] = query_params["exact_phrase"]
-        else:
-            scholar_params["q"] = f'"{query_params["exact_phrase"]}"'
-
-    if query_params.get("at_least_one"):
-        scholar_params["as_oq"] = query_params["at_least_one"] # "with at least one of the words"
-
-    if query_params.get("without_words"):
-        scholar_params["as_eq"] = query_params["without_words"] # "without the words"
-
-    if query_params.get("author"):
-        scholar_params["as_sauthors"] = query_params["author"]
-
-    if query_params.get("publication"):
-        scholar_params["as_publication"] = query_params["publication"]
-
-    date_range = query_params.get("date_range", {})
-    if date_range.get("start_year"):
-        scholar_params["as_ylo"] = date_range["start_year"]
-    if date_range.get("end_year"):
-        scholar_params["as_yhi"] = date_range["end_year"]
+    scholar_params = {
+        'as_q': query_params.get("all_words", ""),
+        'as_epq': query_params.get("exact_phrase", ""),
+        'as_oq': query_params.get("at_least_one", ""),
+        'as_eq': query_params.get("without_words", ""),
+        'as_occt': 'any',
+        'as_sauthors': query_params.get("author", ""),
+        'as_publication': query_params.get("publication", ""),
+        'as_ylo': query_params.get("date_range", {}).get("start_year", ""),
+        'as_yhi': query_params.get("date_range", {}).get("end_year", ""),
+        'hl': 'en',
+        'as_sdt': '0,5'
+    }
 
     if query_params.get("full_text_only"):
-        # Google Scholar doesn't have a direct URL parameter for "full text only"
-        # It's usually a checkbox on the advanced search page or implied by certain search terms.
-        # We might need to interact with the advanced search form directly if this is critical.
-        # For now, we'll omit it as a direct URL param.
         logging.warning("full_text_only is not directly supported via URL parameters for Google Scholar. This filter will be ignored.")
 
     if query_params.get("review_articles_only"):
-        # Similar to full_text_only, this is not a direct URL param.
         logging.warning("review_articles_only is not directly supported via URL parameters for Google Scholar. This filter will be ignored.")
 
     # Add the start index for pagination
     if start_index > 0:
         scholar_params["start"] = start_index
-
-    # Force English language interface
-    scholar_params["hl"] = "en"
-
-    # Construct the URL
-    if not scholar_params: # Explicitly check if scholar_params is empty
-        return GOOGLE_SCHOLAR_BASE_URL
 
     encoded_params = urlencode(scholar_params)
     return f"{GOOGLE_SCHOLAR_BASE_URL}?{encoded_params}"
@@ -180,34 +147,69 @@ def _get_scholar_profile_details(driver, scholar_user_id):
 
 def _is_author_relevant(author_name, relevant_author_query):
     """
-    Checks if an author's name matches a relevant author query, handling various formats.
-    Example: "Yves-Loic Martin" should match "Y. Martin" or "Y.L. Martin".
+    Checks if an author's name from the search results is relevant to the queried author name.
+    This function handles full names, initials, and variations in formatting.
+    e.g., "Richard Handler" (query) should match "R Handler" (result).
+    e.g., "Y. Martin" (query) should match "Yves-Loic Martin" (result).
     """
     if not relevant_author_query:
         return False
 
-    query_parts = relevant_author_query.lower().split()
-    author_parts = author_name.lower().replace('-', ' ').split()
+    # Normalize both names: lowercase, remove hyphens and periods.
+    author_norm = author_name.lower().replace('-', ' ').replace('.', '')
+    query_norm = relevant_author_query.lower().replace('-', ' ').replace('.', '')
 
-    # Simple case: direct match
-    if relevant_author_query.lower() == author_name.lower():
+    # Direct comparison for exact matches (e.g., "r handler" vs "r handler")
+    if author_norm == query_norm:
         return True
 
-    # Check for initial + last name matches
-    # e.g., query "Y. Martin" and author "Yves-Loic Martin"
-    try:
-        query_initials = [p for p in query_parts if p.endswith('.')]
-        query_last_name = [p for p in query_parts if not p.endswith('.')][-1]
+    author_parts = author_norm.split()
+    query_parts = query_norm.split()
 
-        author_initials = [p[0] + '.' for p in author_parts[:-1]]
-        author_last_name = author_parts[-1]
+    if not author_parts or not query_parts:
+        return False
 
-        if query_last_name == author_last_name:
-            # Check if all query initials are present in the author's initials
-            return all(init in author_initials for init in query_initials)
-    except IndexError:
-        # Fallback for names that don't fit the pattern
-        pass
+    # Last names must match.
+    if author_parts[-1] != query_parts[-1]:
+        return False
+
+    # --- At this point, last names match. Now check first/middle names/initials. ---
+
+    author_first_names = author_parts[:-1]
+    query_first_names = query_parts[:-1]
+
+    # If one has no first name parts, the other must also have no first name parts.
+    if not author_first_names and not query_first_names:
+        return True
+    if not author_first_names or not query_first_names:
+        return False
+
+    # Check for initial-based matches.
+    # This is bidirectional: works if the query has initials and the result has full names, or vice-versa.
+    
+    # Form the initial strings for both the author and the query.
+    author_initials_str = "".join([name[0] for name in author_first_names])
+    query_initials_str = "".join([name[0] for name in query_first_names])
+
+    # Form the full first name strings.
+    author_first_name_full_str = "".join(author_first_names)
+    query_first_name_full_str = "".join(query_first_names)
+
+    # Case 1: Query has initials, author has full name (e.g., query "r handler", author "richard handler")
+    # This checks if the query's first name part(s) are the initials of the author's first name part(s).
+    if query_first_name_full_str == author_initials_str:
+        return True
+
+    # Case 2: Author has initials, query has full name (e.g., query "richard handler", author "r handler")
+    # This checks if the author's first name part(s) are the initials of the query's first name part(s).
+    if author_first_name_full_str == query_initials_str:
+        return True
+
+    # Case 3: Partial match where one is a prefix of the other (e.g., "yves" vs "yves loic")
+    # This is useful for cases where a middle name is omitted.
+    if " ".join(author_first_names).startswith(" ".join(query_first_names)) or \
+       " ".join(query_first_names).startswith(" ".join(author_first_names)):
+        return True
 
     return False
 
@@ -457,15 +459,14 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     # Example usage:
-    # python search_google_scholar.py '{"query": {"all_words": "large language models", "date_range": {"start_year": 2022}}}'
-    # python search_google_scholar.py '{"query": {"exact_phrase": "reinforcement learning from human feedback", "author": "OpenAI"}}'
-    # python search_google_scholar.py '{"query": {"all_words": "AI ethics"}, "max_articles": 5}'
-    # python search_google_scholar.py '{"query": {"all_words": "AI ethics"}, "fetch_author_details": "none", "max_articles": 2}'
+    # python src\actions\search_google_scholar.py '{""query"": {""all_words"": ""large language models"", ""date_range"": {""start_year"": 2022}}}'
+    # python src\actions\search_google_scholar.py '{""query"": {""exact_phrase"": ""reinforcement learning from human feedback"", ""author"": ""OpenAI""}}'
+    # python src\actions\search_google_scholar.py '{""query"": {""all_words": ""AI ethics""}, ""max_articles"": 5}'
+    # python src\actions\search_google_scholar.py '{""query"": {""all_words": ""AI ethics""}, ""fetch_author_details"": ""none"", ""max_articles"": 2}'
     # Test case: fetch all author details for 2 articles
-    # python search_google_scholar.py '{"query": {"all_words": "machine learning"}, "fetch_author_details": "all", "max_articles": 2}'
+    # python src\actions\search_google_scholar.py '{""query"": {""all_words"": ""machine learning""}, ""fetch_author_details"": ""all"", ""max_articles"": 2}'
     # Test case: fetch relevant author details for 2 articles
-    # python search_google_scholar.py '{"query": {"author": "Y. Martin", "all_words": "machine learning"}, "fetch_author_details": "relevant", "max_articles": 10}'
-
+    # python src\actions\search_google_scholar.py '{""query"": {""author"": ""Richard Handler"", ""all_words"": ""authenticity""}, ""fetch_author_details"": ""relevant"", ""max_articles"": 10}'
 
     if len(sys.argv) < 2:
         print("Usage: python search_google_scholar.py <JSON_PARAMS_STRING>")
