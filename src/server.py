@@ -66,9 +66,9 @@ def create_app(testing=False):
         os.makedirs(os.path.join(PROJECT_ROOT, app.config['ACTIONS_DIR']), exist_ok=True)
         
         timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
-        if not os.path.exists(timestamp_file):
-            with open(timestamp_file, 'w') as f:
-                f.write(str(time.time()))
+        # Always write the current timestamp on startup to prevent immediate shutdown
+        with open(timestamp_file, 'w') as f:
+            f.write(str(time.time()))
 
     # --- Scheduler & Startup Jobs ---
     if not testing:
