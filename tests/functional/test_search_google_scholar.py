@@ -104,7 +104,7 @@ class TestSearchGoogleScholarFunctional:
                 "all_words": "test query",
                 "date_range": {"start_year": 2020, "end_year": 2023}
             },
-            "fetch_author_details": True, # Added this line
+            "fetch_author_details": "all",
         }
 
         # Create a temporary directory for the test
@@ -180,7 +180,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "nonexistent query"
             },
-            "fetch_author_details": True, # Added this line
+            "fetch_author_details": "all",
         }
 
         temp_download_dir = tempfile.mkdtemp()
@@ -297,7 +297,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "pagination test"
             },
-            "fetch_author_details": True, # Added this line
+            "fetch_author_details": "all",
         }
 
         temp_download_dir = tempfile.mkdtemp()
@@ -377,7 +377,7 @@ class TestSearchGoogleScholarFunctional:
             "query": {
                 "all_words": "error test"
             },
-            "fetch_author_details": True, # Added this line
+            "fetch_author_details": "all",
         }
 
         temp_download_dir = tempfile.mkdtemp()

@@ -137,7 +137,53 @@ Polls for a task result.
 - **Pending Response:** `{ "status": "pending", ... }`
 - **Complete Response:** `{ "status": "complete", "result": { ... } }`
 
-## 9. Google Apps Script Integration
+## 9. Actions
+
+The following actions are available via the `/inbound` endpoint.
+
+### `search_google_scholar`
+
+Performs an advanced search on Google Scholar and scrapes the results.
+
+**Input JSON Format:**
+```json
+{
+  "action": "search_google_scholar",
+  "params": {
+    "query": {
+      "all_words": "string",
+      "exact_phrase": "string",
+      "at_least_one": "string",
+      "without_words": "string",
+      "author": "string",
+      "publication": "string",
+      "date_range": {
+        "start_year": "integer",
+        "end_year": "integer"
+      }
+    },
+    "fetch_author_details": "string ('none', 'all', or 'relevant')",
+    "max_articles": "integer"
+  }
+}
+```
+
+### `full_recursive_download`
+
+Recursively navigates to a URL and extracts all visible text from linked pages within the same domain.
+
+**Input JSON Format:**
+```json
+{
+  "action": "full_recursive_download",
+  "params": {
+    "url": "string",
+    "max_depth": "integer"
+  }
+}
+```
+
+## 10. Google Apps Script Integration
 
 An example client implementation using Google Apps Script can be found here: [examples/google_apps_script/master-bus.gs](examples/google_apps_script/master-bus.gs).
 

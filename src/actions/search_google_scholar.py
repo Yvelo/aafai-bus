@@ -178,7 +178,40 @@ def _get_scholar_profile_details(driver, scholar_user_id):
     
     return profile_details
 
-def _parse_single_article(article_element, driver, fetch_author_details, author_profile_cache):
+def _is_author_relevant(author_name, relevant_author_query):
+    """
+    Checks if an author's name matches a relevant author query, handling various formats.
+    Example: "Yves-Loic Martin" should match "Y. Martin" or "Y.L. Martin".
+    """
+    if not relevant_author_query:
+        return False
+
+    query_parts = relevant_author_query.lower().split()
+    author_parts = author_name.lower().replace('-', ' ').split()
+
+    # Simple case: direct match
+    if relevant_author_query.lower() == author_name.lower():
+        return True
+
+    # Check for initial + last name matches
+    # e.g., query "Y. Martin" and author "Yves-Loic Martin"
+    try:
+        query_initials = [p for p in query_parts if p.endswith('.')]
+        query_last_name = [p for p in query_parts if not p.endswith('.')][-1]
+
+        author_initials = [p[0] + '.' for p in author_parts[:-1]]
+        author_last_name = author_parts[-1]
+
+        if query_last_name == author_last_name:
+            # Check if all query initials are present in the author's initials
+            return all(init in author_initials for init in query_initials)
+    except IndexError:
+        # Fallback for names that don't fit the pattern
+        pass
+
+    return False
+
+def _parse_single_article(article_element, driver, fetch_author_details, relevant_author_query, author_profile_cache):
     """
     Parses a single Google Scholar article element and extracts relevant information.
     """
@@ -219,7 +252,10 @@ def _parse_single_article(article_element, driver, fetch_author_details, author_
             "scholar_citations": None
         }
 
-        if fetch_author_details and scholar_user:
+        should_fetch = (fetch_author_details == 'all') or \
+                       (fetch_author_details == 'relevant' and _is_author_relevant(name, relevant_author_query))
+
+        if should_fetch and scholar_user:
             if scholar_user not in author_profile_cache:
                 profile_details = _get_scholar_profile_details(driver, scholar_user)
                 author_profile_cache[scholar_user] = profile_details
@@ -311,8 +347,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     if not query_params:
         raise ValueError("'query' parameter is missing or empty for 'search_google_scholar'")
 
-    fetch_author_details = params.get('fetch_author_details', False)
+    fetch_author_details = params.get('fetch_author_details', 'none') # 'none', 'all', 'relevant'
     max_articles = params.get('max_articles', DEFAULT_MAX_NUMBER_OF_ARTICLES)
+    relevant_author_query = query_params.get('author') if fetch_author_details == 'relevant' else None
 
     # Create a job-specific directory for driver logs and cache
     job_download_dir = os.path.join(download_dir, job_id)
@@ -359,7 +396,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     break # Stop processing if max_articles is reached
 
                 try:
-                    parsed_article = _parse_single_article(article_element, driver, fetch_author_details, author_profile_cache)
+                    parsed_article = _parse_single_article(article_element, driver, fetch_author_details, relevant_author_query, author_profile_cache)
                     all_results.append(parsed_article)
                 except Exception as e:
                     logging.warning(f"Error parsing article {i} on page {start_index}: {e}")
@@ -423,11 +460,11 @@ if __name__ == '__main__':
     # python search_google_scholar.py '{"query": {"all_words": "large language models", "date_range": {"start_year": 2022}}}'
     # python search_google_scholar.py '{"query": {"exact_phrase": "reinforcement learning from human feedback", "author": "OpenAI"}}'
     # python search_google_scholar.py '{"query": {"all_words": "AI ethics"}, "max_articles": 5}'
-    # python search_google_scholar.py '{"query": {"all_words": "AI ethics"}, "fetch_author_details": false, "max_articles": 2}'
-    # Test case: fetch author details for 2 articles
-    # python search_google_scholar.py '{"query": {"all_words": "machine learning"}, "fetch_author_details": true, "max_articles": 2}'
-    # Test case: do not fetch author details for 2 articles
-    # python search_google_scholar.py '{"query": {"all_words": "machine learning"}, "fetch_author_details": false, "max_articles": 2}'
+    # python search_google_scholar.py '{"query": {"all_words": "AI ethics"}, "fetch_author_details": "none", "max_articles": 2}'
+    # Test case: fetch all author details for 2 articles
+    # python search_google_scholar.py '{"query": {"all_words": "machine learning"}, "fetch_author_details": "all", "max_articles": 2}'
+    # Test case: fetch relevant author details for 2 articles
+    # python search_google_scholar.py '{"query": {"author": "Y. Martin", "all_words": "machine learning"}, "fetch_author_details": "relevant", "max_articles": 10}'
 
 
     if len(sys.argv) < 2:
