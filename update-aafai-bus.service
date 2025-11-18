@@ -1,0 +1,13 @@
+[Unit]
+Description=Update aafai-bus application from Git repository
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/var/www/aafai-bus/update-aafai-bus-service.sh
+WorkingDirectory=/var/www/aafai-bus
+User=root
+
+[Install]
+WantedBy=multi-user.target
