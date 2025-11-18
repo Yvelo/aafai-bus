@@ -190,5 +190,5 @@ An example client implementation using Google Apps Script can be found here: [ex
 This script can be added to a Google Sheet to:
 - Provide a custom menu to start tasks.
 - Automatically start the `aafai-bus` VM on Google Cloud.
-- Submit tasks and poll for results.
+- Submit tasks and poll for results. It now includes a **batch mode** to efficiently send and retrieve multiple tasks at once.
 - Save the final text result to a file in the user's Google Drive.
