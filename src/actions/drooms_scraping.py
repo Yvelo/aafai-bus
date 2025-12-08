@@ -125,152 +125,154 @@ def _sanitize_filename(name):
     name_no_newlines = name.replace('\n', ' ')
     return re.sub(r'[<>:"/\\|?*]', '_', name_no_newlines).strip()
 
-def _get_indent_level(node):
-    """Determines the indentation level of a node from its CSS padding."""
-    try:
-        icon_container = node.find_element(By.CSS_SELECTOR, ".index-icons")
-        padding_str = icon_container.value_of_css_property("padding-left")
-        return int(re.search(r'\d+', padding_str).group())
-    except (NoSuchElementException, AttributeError):
-        return 0
-
 def _expand_all_folders(driver):
-    """Iteratively expands all folders on the page, with detailed logging."""
+    """Iteratively expands all folders on the page until none are left collapsed."""
     print("Expanding all folders...")
-    for i in range(10):
-        print(f"--- Expansion pass {i + 1} ---")
-        newly_expanded_in_pass = False
-        try:
-            all_folders = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point.folder")
-            if not all_folders:
-                print("No folders found on the page.")
-                break
+    attempts = 0
+    max_attempts = 20  # Safety break to prevent infinite loops
 
-            print(f"Found {len(all_folders)} total folders. Current state:")
-            for folder in all_folders:
-                try:
-                    is_expanded = 'expanded' in folder.get_attribute('class')
-                    folder_text_element = folder.find_element(By.CSS_SELECTOR, ".index-description-text")
-                    folder_name = folder_text_element.text.strip().replace('\n', ' ')
-                    status = "Expanded" if is_expanded else "Collapsed"
-                    indent = _get_indent_level(folder)
-                    indent_prefix = "  " * (indent // 20)  # Assuming ~20px indent per level
-                    print(f"{indent_prefix}- {folder_name} [{status}]")
-                except StaleElementReferenceException:
-                    continue
-
-            # Find the next collapsed folder and expand it
-            for folder in all_folders:
-                try:
-                    is_expanded = 'expanded' in folder.get_attribute('class')
-                    if not is_expanded:
-                        arrow_icon = folder.find_element(By.CSS_SELECTOR, "div[data-e2e='index-arrow-icon']")
-                        
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrow_icon)
-                        time.sleep(0.5)
-                        arrow_icon.click()
-                        time.sleep(1.5)
-                        
-                        newly_expanded_in_pass = True
-                except (StaleElementReferenceException, ElementNotInteractableException):
-                    print("Stale element encountered, starting a new expansion pass.")
-                    newly_expanded_in_pass = True
-                    break
-            
-            if not newly_expanded_in_pass:
-                print("--- No more folders to expand. Expansion complete. ---")
-                break
+    while attempts < max_attempts:
+        attempts += 1
+        print(f"--- Expansion pass {attempts} ---")
         
+        try:
+            # Find all collapsed folders that are visible
+            collapsed_folders = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point.folder:not(.expanded)")
+            
+            if not collapsed_folders:
+                print("--- No more collapsed folders found. Expansion complete. ---")
+                break
+
+            print(f"Found {len(collapsed_folders)} collapsed folders to expand in this pass.")
+            
+            # Click the first visible collapsed folder
+            folder_to_expand = collapsed_folders[0]
+            arrow_icon = folder_to_expand.find_element(By.CSS_SELECTOR, "div[data-e2e='index-arrow-icon']")
+            
+            # Scroll to the folder and click
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrow_icon)
+            time.sleep(0.5)
+            arrow_icon.click()
+            
+            folder_name_element = folder_to_expand.find_element(By.CSS_SELECTOR, ".index-description-text")
+            print(f"Expanded: {folder_name_element.text.strip().replace(chr(10), ' ')}")
+            
+            # Wait for the UI to update
+            time.sleep(1.5)
+
+        except (StaleElementReferenceException, ElementNotInteractableException):
+            print("Stale element or not interactable, retrying pass.")
+            time.sleep(1)
+            continue
         except Exception as e:
             print(f"An unexpected error occurred during folder expansion: {e}")
             break
             
+    if attempts >= max_attempts:
+        print("Warning: Reached max expansion attempts. The folder tree may be incomplete.")
+        
     print("Finished expanding folders.")
 
-
 def _gather_all_items(driver):
-    """Gathers information about all items after expansion, including order index."""
+    """Gathers information about all items after expansion, including their order index."""
     print("Gathering all items...")
     all_items = []
     nodes = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point")
-    for i, node in enumerate(nodes):
+    
+    for node in nodes:
         try:
             data_e2e = node.get_attribute('data-e2e')
             if not data_e2e or 'inbox' in data_e2e or 'trash' in data_e2e:
                 continue
 
-            # Extract the order index text
             order_text = ""
             try:
                 order_element = node.find_element(By.CSS_SELECTOR, ".index-description-order")
                 order_text = order_element.text.strip()
             except NoSuchElementException:
-                pass # Not all items have an order index
+                # Items without an order index are skipped as they are not part of the main hierarchy
+                continue
 
             node_text_element = node.find_element(By.CSS_SELECTOR, ".index-description-text")
             base_name = node_text_element.text.strip()
             if not base_name:
                 continue
 
-            # Combine order index and name
             full_name = f"{order_text} {base_name}".strip()
             sanitized_name = _sanitize_filename(full_name)
 
             is_folder = "folder" in node.find_element(By.CSS_SELECTOR, "drs-index-avatar use").get_attribute("xlink:href")
-            indent_level = _get_indent_level(node)
             
             all_items.append({
-                "index": i,
                 "id": data_e2e,
+                "order": order_text,
                 "text": sanitized_name,
                 "is_folder": is_folder,
-                "indent": indent_level,
             })
         except (NoSuchElementException, StaleElementReferenceException):
             continue
-    print(f"Gathered {len(all_items)} items.")
+            
+    print(f"Gathered {len(all_items)} items with order index.")
     return all_items
 
 def _process_all_items(driver, items, download_root):
     """
-    Iteratively processes all items to create folders and download documents.
+    Iteratively processes all items to create folders and download documents using their order index.
     """
-    path_stack = [(download_root, -1)]  # Stack of (path, indent_level)
+    # A dictionary to keep track of the created directory paths for each order index
+    path_map = {"": download_root}
 
-    for item in items:
-        current_indent = item['indent']
+    # First, create all the folder structures
+    for item in sorted(items, key=lambda x: tuple(map(int, x['order'].split('.')))):
+        if not item['is_folder']:
+            continue
 
-        while path_stack and current_indent <= path_stack[-1][1]:
-            path_stack.pop()
+        order_parts = item['order'].split('.')
+        parent_order = ".".join(order_parts[:-1])
         
-        parent_path = path_stack[-1][0]
+        parent_path = path_map.get(parent_order)
+        if parent_path is None:
+            print(f"Warning: Could not find parent path for folder {item['text']}. Placing in root.")
+            parent_path = download_root
 
+        new_path = os.path.join(parent_path, item['text'])
+        os.makedirs(new_path, exist_ok=True)
+        path_map[item['order']] = new_path
+        print(f"Ensured folder exists for order {item['order']}: {new_path}")
+
+    # Now, process the documents
+    for item in items:
         if item['is_folder']:
-            new_path = os.path.join(parent_path, item['text'])
-            print(f"Ensuring folder exists: {new_path}")
-            os.makedirs(new_path, exist_ok=True)
-            path_stack.append((new_path, current_indent))
-        else:
-            pdf_path = os.path.join(parent_path, f"{item['text']}.pdf")
-            if os.path.exists(pdf_path):
-                print(f"  Skipping existing document: {item['text']}")
-                continue
-            
-            print(f"  Processing document: {item['text']}")
-            try:
-                element_to_click = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, f"app-index-list-point[data-e2e='{item['id']}'] .index-description-text"))
-                )
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
-                time.sleep(0.2)
-                element_to_click.click()
-                _process_document(driver, pdf_path)
-                WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
-            except Exception as e:
-                print(f"    Could not process document '{item['text']}'. Error: {e}")
-                driver.get(driver.current_url) 
-                WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
+            continue
 
+        order_parts = item['order'].split('.')
+        parent_order = ".".join(order_parts[:-1])
+        
+        parent_path = path_map.get(parent_order)
+        if parent_path is None:
+            print(f"Warning: Could not find parent path for document {item['text']}. Placing in root.")
+            parent_path = download_root
+
+        pdf_path = os.path.join(parent_path, f"{item['text']}.pdf")
+        if os.path.exists(pdf_path):
+            print(f"  Skipping existing document: {item['text']}")
+            continue
+        
+        print(f"  Processing document: {item['text']}")
+        try:
+            element_to_click = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, f"app-index-list-point[data-e2e='{item['id']}'] .index-description-text"))
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
+            time.sleep(0.2)
+            element_to_click.click()
+            _process_document(driver, pdf_path)
+            WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
+        except Exception as e:
+            print(f"    Could not process document '{item['text']}'. Error: {e}")
+            # Try to recover by going back to the main list view
+            driver.get(driver.current_url) 
+            WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
 
 def _process_document(driver, pdf_path):
     """Screenshots and assembles a document into a single PDF using robust capture methods."""
@@ -282,7 +284,8 @@ def _process_document(driver, pdf_path):
     body = driver.find_element(By.TAG_NAME, 'body')
 
     try:
-        body.send_keys(Keys.F11)
+        # Use JavaScript to enter fullscreen for more reliability
+        driver.execute_script("document.documentElement.requestFullscreen();")
         print("    -> Entered fullscreen mode.")
         time.sleep(2)
 
@@ -290,6 +293,7 @@ def _process_document(driver, pdf_path):
         print("    -> Viewer loaded.")
         time.sleep(2)
 
+        # Determine orientation from the first page
         is_landscape = False
         try:
             first_page = viewer.find_element(By.CSS_SELECTOR, ".page-wrapper")
@@ -300,6 +304,7 @@ def _process_document(driver, pdf_path):
         except NoSuchElementException:
             print("    -> Could not determine page orientation, defaulting to portrait.")
 
+        # Adjust scrolling based on orientation
         scrolls_per_page = 14 if is_landscape else 21
         
         processed_pages = set()
@@ -313,9 +318,8 @@ def _process_document(driver, pdf_path):
                 try:
                     page_id = page_wrapper.get_attribute('data-e2e')
                     if page_id and page_id not in processed_pages:
-                        # Scroll each page into view before taking a screenshot
                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", page_wrapper)
-                        time.sleep(0.5) # Allow time for rendering after scroll
+                        time.sleep(0.5)
 
                         img_path = os.path.join(temp_img_dir, f"{page_id}.png")
                         page_wrapper.screenshot(img_path)
@@ -333,7 +337,6 @@ def _process_document(driver, pdf_path):
 
             if len(processed_pages) == initial_page_count:
                 no_new_pages_count += 1
-                print("    -> No new pages found in this scroll cycle.")
             else:
                 no_new_pages_count = 0
 
@@ -341,11 +344,12 @@ def _process_document(driver, pdf_path):
                 print("    -> Reached end of document.")
                 break
 
-            if len(processed_pages) > 250:  # Increased safety break
-                print("    -> Safety break: captured 250 pages.")
+            if len(processed_pages) > 300: # Increased safety break
+                print("    -> Safety break: captured 300 pages.")
                 break
 
         if image_files:
+            # Sort images based on the numeric part of their page ID
             image_files.sort(key=lambda x: int(re.search(r'\d+$', x[0]).group()))
             sorted_image_paths = [p[1] for p in image_files]
             
@@ -360,13 +364,15 @@ def _process_document(driver, pdf_path):
                     print(f"    -> Error creating PDF: {img_err}")
 
     finally:
-        body.send_keys(Keys.F11)
+        # Use JavaScript to exit fullscreen
+        driver.execute_script("document.exitFullscreen();")
         print("    -> Exited fullscreen mode.")
         time.sleep(1)
 
         if os.path.exists(temp_img_dir):
             shutil.rmtree(temp_img_dir)
         try:
+            # More robust selector for the close button
             close_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-e2e='close'], [aria-label='Close']")))
             close_button.click()
             print("    -> Closed document viewer.")
