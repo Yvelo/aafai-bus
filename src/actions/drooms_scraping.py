@@ -32,24 +32,20 @@ def run(params, job_context):
     url = params.get('url')
     username = params.get('username')
     password = params.get('password')
+    headless = params.get('headless', True)
 
     if not all([url, username, password]):
         return {"status": "error", "message": "Missing required parameters: url, username, or password."}
 
-    output_dir = job_context.get('job_output_dir')
-    # Persistent download root, placed alongside the job-specific output directory
-    if output_dir:
-        download_root = os.path.join(os.path.dirname(output_dir), 'drooms_download')
-    else:
-        # Fallback to a directory in the current working directory if job_output_dir is not set
-        download_root = os.path.join(os.getcwd(), 'drooms_download')
+    # Use a hardcoded root path to avoid long path issues on Windows
+    download_root = 'C:/temp/drooms_scraping'
         
     os.makedirs(download_root, exist_ok=True)
     print(f"Using download root: {download_root}")
 
     driver = None
     try:
-        driver = _setup_driver()
+        driver = _setup_driver(headless=headless)
         _login(driver, url, username, password)
         
         WebDriverWait(driver, 60).until(
@@ -66,6 +62,7 @@ def run(params, job_context):
         print(f"An error occurred during D-Rooms scraping: {e}")
         if driver:
             # Ensure output_dir exists for error screenshot
+            output_dir = job_context.get('job_output_dir')
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
                 error_screenshot_path = os.path.join(output_dir, 'error_screenshot.png')
@@ -80,13 +77,14 @@ def run(params, job_context):
 
 # --- Helper Functions ---
 
-def _setup_driver():
+def _setup_driver(headless=True):
     """Sets up the Selenium WebDriver."""
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
+    if headless:
+        options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1600") # Increased height for better rendering
+    options.add_argument("--window-size=1920,1080")
     
     print("Initializing WebDriver...")
     return webdriver.Chrome(options=options)
@@ -129,7 +127,7 @@ def _expand_all_folders(driver):
     """Iteratively expands all folders on the page until none are left collapsed."""
     print("Expanding all folders...")
     attempts = 0
-    max_attempts = 20  # Safety break to prevent infinite loops
+    max_attempts = 1000  # Safety break to prevent infinite loops
 
     while attempts < max_attempts:
         attempts += 1
@@ -174,86 +172,114 @@ def _expand_all_folders(driver):
     print("Finished expanding folders.")
 
 def _gather_all_items(driver):
-    """Gathers information about all items after expansion, including their order index."""
+    """Gathers all items by scrolling through the virtual list."""
     print("Gathering all items...")
-    all_items = []
-    nodes = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point")
     
-    for node in nodes:
-        try:
-            data_e2e = node.get_attribute('data-e2e')
-            if not data_e2e or 'inbox' in data_e2e or 'trash' in data_e2e:
-                continue
+    # Scroll to top before starting
+    _scroll_to_top(driver)
 
-            order_text = ""
+    all_items_map = {}
+    last_count = -1
+    consecutive_no_change = 0
+
+    while consecutive_no_change < 3: # Stop after 3 scrolls with no new items
+        nodes = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point")
+        
+        for node in nodes:
             try:
-                order_element = node.find_element(By.CSS_SELECTOR, ".index-description-order")
-                order_text = order_element.text.strip()
-            except NoSuchElementException:
-                # Items without an order index are skipped as they are not part of the main hierarchy
+                data_e2e = node.get_attribute('data-e2e')
+                if not data_e2e or 'inbox' in data_e2e or 'trash' in data_e2e:
+                    continue
+
+                if data_e2e in all_items_map:
+                    continue
+
+                order_text = ""
+                try:
+                    order_element = node.find_element(By.CSS_SELECTOR, ".index-description-order")
+                    order_text = order_element.text.strip()
+                except NoSuchElementException:
+                    continue
+                
+                if not order_text:
+                    continue
+
+                node_text_element = node.find_element(By.CSS_SELECTOR, ".index-description-text")
+                base_name = node_text_element.text.strip()
+                if not base_name:
+                    continue
+
+                # Do not include the order prefix in the item's text to keep paths short.
+                sanitized_name = _sanitize_filename(base_name)
+                is_folder = 'folder' in node.get_attribute('class')
+                
+                all_items_map[data_e2e] = {
+                    "id": data_e2e,
+                    "order": order_text,
+                    "text": sanitized_name,
+                    "is_folder": is_folder,
+                }
+            except (NoSuchElementException, StaleElementReferenceException):
                 continue
+        
+        current_count = len(all_items_map)
+        if current_count == last_count:
+            consecutive_no_change += 1
+        else:
+            consecutive_no_change = 0
+        last_count = current_count
 
-            node_text_element = node.find_element(By.CSS_SELECTOR, ".index-description-text")
-            base_name = node_text_element.text.strip()
-            if not base_name:
-                continue
+        # Scroll down
+        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.PAGE_DOWN)
+        time.sleep(1)
 
-            full_name = f"{order_text} {base_name}".strip()
-            sanitized_name = _sanitize_filename(full_name)
-
-            is_folder = "folder" in node.find_element(By.CSS_SELECTOR, "drs-index-avatar use").get_attribute("xlink:href")
-            
-            all_items.append({
-                "id": data_e2e,
-                "order": order_text,
-                "text": sanitized_name,
-                "is_folder": is_folder,
-            })
-        except (NoSuchElementException, StaleElementReferenceException):
-            continue
-            
-    print(f"Gathered {len(all_items)} items with order index.")
+    all_items = list(all_items_map.values())
+    print(f"Gathered {len(all_items)} unique items.")
     return all_items
+
+def _scroll_to_top(driver):
+    """Scrolls the virtual scroll viewport to the top."""
+    print("Scrolling virtual list to the top...")
+    try:
+        scroll_viewport = driver.find_element(By.CSS_SELECTOR, "cdk-virtual-scroll-viewport")
+        driver.execute_script("arguments[0].scrollTop = 0;", scroll_viewport)
+        print("Virtual list scrolled to top.")
+    except NoSuchElementException:
+        print("Warning: cdk-virtual-scroll-viewport not found. Falling back to window scroll.")
+        driver.execute_script("window.scrollTo(0, 0);")
+    time.sleep(2)
 
 def _process_all_items(driver, items, download_root):
     """
-    Iteratively processes all items to create folders and download documents using their order index.
+    Iteratively processes all items to create folders and download documents.
     """
-    # A dictionary to keep track of the created directory paths for each order index
+    # Ensure we start from a known state
+    _scroll_to_top(driver)
+
     path_map = {"": download_root}
 
-    # First, create all the folder structures
-    for item in sorted(items, key=lambda x: tuple(map(int, x['order'].split('.')))):
-        if not item['is_folder']:
-            continue
-
+    # Create all folder structures first
+    sorted_folders = sorted([item for item in items if item['is_folder']], key=lambda x: tuple(map(int, x['order'].split('.'))))
+    for item in sorted_folders:
         order_parts = item['order'].split('.')
         parent_order = ".".join(order_parts[:-1])
         
-        parent_path = path_map.get(parent_order)
-        if parent_path is None:
-            print(f"Warning: Could not find parent path for folder {item['text']}. Placing in root.")
-            parent_path = download_root
-
+        parent_path = path_map.get(parent_order, download_root)
+        # item['text'] is now the clean, sanitized name without prefix.
         new_path = os.path.join(parent_path, item['text'])
         os.makedirs(new_path, exist_ok=True)
         path_map[item['order']] = new_path
-        print(f"Ensured folder exists for order {item['order']}: {new_path}")
 
-    # Now, process the documents
-    for item in items:
-        if item['is_folder']:
-            continue
-
+    # Process documents
+    sorted_docs = sorted([item for item in items if not item['is_folder']], key=lambda x: tuple(map(int, x['order'].split('.'))))
+    for item in sorted_docs:
         order_parts = item['order'].split('.')
         parent_order = ".".join(order_parts[:-1])
         
-        parent_path = path_map.get(parent_order)
-        if parent_path is None:
-            print(f"Warning: Could not find parent path for document {item['text']}. Placing in root.")
-            parent_path = download_root
-
+        parent_path = path_map.get(parent_order, download_root)
+        # item['text'] is the clean name.
         pdf_path = os.path.join(parent_path, f"{item['text']}.pdf")
+
         if os.path.exists(pdf_path):
             print(f"  Skipping existing document: {item['text']}")
             continue
@@ -264,18 +290,17 @@ def _process_all_items(driver, items, download_root):
                 EC.element_to_be_clickable((By.CSS_SELECTOR, f"app-index-list-point[data-e2e='{item['id']}'] .index-description-text"))
             )
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
-            time.sleep(0.2)
+            time.sleep(0.5)
             element_to_click.click()
             _process_document(driver, pdf_path)
             WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
         except Exception as e:
             print(f"    Could not process document '{item['text']}'. Error: {e}")
-            # Try to recover by going back to the main list view
             driver.get(driver.current_url) 
             WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "app-index-list-view")))
 
 def _process_document(driver, pdf_path):
-    """Screenshots and assembles a document into a single PDF using robust capture methods."""
+    """Screenshots and assembles a document into a single PDF."""
     print(f"    -> Saving to: {os.path.basename(pdf_path)}")
     temp_img_dir = os.path.join(os.path.dirname(pdf_path), "temp_images_" + os.path.basename(pdf_path))
     os.makedirs(temp_img_dir, exist_ok=True)
@@ -284,29 +309,12 @@ def _process_document(driver, pdf_path):
     body = driver.find_element(By.TAG_NAME, 'body')
 
     try:
-        # Use JavaScript to enter fullscreen for more reliability
         driver.execute_script("document.documentElement.requestFullscreen();")
-        print("    -> Entered fullscreen mode.")
         time.sleep(2)
 
         viewer = WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-e2e='doc-reader-document-component']")))
-        print("    -> Viewer loaded.")
         time.sleep(2)
 
-        # Determine orientation from the first page
-        is_landscape = False
-        try:
-            first_page = viewer.find_element(By.CSS_SELECTOR, ".page-wrapper")
-            page_size = first_page.size
-            if page_size['width'] > page_size['height']:
-                is_landscape = True
-            print(f"    -> Document is {'landscape' if is_landscape else 'portrait'}.")
-        except NoSuchElementException:
-            print("    -> Could not determine page orientation, defaulting to portrait.")
-
-        # Adjust scrolling based on orientation
-        scrolls_per_page = 14 if is_landscape else 21
-        
         processed_pages = set()
         no_new_pages_count = 0
 
@@ -325,14 +333,10 @@ def _process_document(driver, pdf_path):
                         page_wrapper.screenshot(img_path)
                         image_files.append((page_id, img_path))
                         processed_pages.add(page_id)
-                        print(f"    -> Captured page {page_id}")
                 except StaleElementReferenceException:
                     continue
             
-            print(f"    -> Scrolling down ({scrolls_per_page} key presses)...")
-            for _ in range(scrolls_per_page):
-                body.send_keys(Keys.ARROW_DOWN)
-                time.sleep(0.05)
+            body.send_keys(Keys.PAGE_DOWN)
             time.sleep(1)
 
             if len(processed_pages) == initial_page_count:
@@ -340,42 +344,27 @@ def _process_document(driver, pdf_path):
             else:
                 no_new_pages_count = 0
 
-            if no_new_pages_count >= 2:
-                print("    -> Reached end of document.")
+            if no_new_pages_count >= 3:
                 break
 
-            if len(processed_pages) > 300: # Increased safety break
-                print("    -> Safety break: captured 300 pages.")
+            if len(processed_pages) > 300:
                 break
 
         if image_files:
-            # Sort images based on the numeric part of their page ID
             image_files.sort(key=lambda x: int(re.search(r'\d+$', x[0]).group()))
             sorted_image_paths = [p[1] for p in image_files]
             
             if sorted_image_paths:
-                print(f"    -> Creating PDF with {len(sorted_image_paths)} pages...")
-                try:
-                    first_image = Image.open(sorted_image_paths[0]).convert('RGB')
-                    other_images = [Image.open(p).convert('RGB') for p in sorted_image_paths[1:]]
-                    first_image.save(pdf_path, save_all=True, append_images=other_images)
-                    print(f"    -> Successfully created PDF: {os.path.basename(pdf_path)}")
-                except Exception as img_err:
-                    print(f"    -> Error creating PDF: {img_err}")
+                first_image = Image.open(sorted_image_paths[0]).convert('RGB')
+                other_images = [Image.open(p).convert('RGB') for p in sorted_image_paths[1:]]
+                first_image.save(pdf_path, save_all=True, append_images=other_images)
 
     finally:
-        # Use JavaScript to exit fullscreen
         driver.execute_script("document.exitFullscreen();")
-        print("    -> Exited fullscreen mode.")
         time.sleep(1)
-
-        if os.path.exists(temp_img_dir):
-            shutil.rmtree(temp_img_dir)
+        shutil.rmtree(temp_img_dir, ignore_errors=True)
         try:
-            # More robust selector for the close button
             close_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-e2e='close'], [aria-label='Close']")))
             close_button.click()
-            print("    -> Closed document viewer.")
         except TimeoutException:
-            print("    -> Could not find close button; navigating back to recover.")
             driver.back()

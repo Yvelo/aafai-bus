@@ -42,7 +42,7 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         result = drooms_scraping.run(params, job_context)
 
         # --- Assert ---
-        download_root = os.path.join('tmp', 'drooms_download')
+        download_root = 'C:/temp/drooms_scraping'
         mock_makedirs.assert_called_once_with(download_root, exist_ok=True)
         mock_setup_driver.assert_called_once()
         mock_login.assert_called_once_with(mock_driver, params['url'], params['username'], params['password'])
@@ -134,7 +134,7 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         mock_page1.size = {'width': 800, 'height': 1000} 
         
         mock_viewer.find_element.return_value = mock_page1
-        mock_viewer.find_elements.side_effect = [[mock_page1], [], []]
+        mock_viewer.find_elements.side_effect = [[mock_page1], [], [], []]
         
         mock_image = MagicMock()
         mock_image.convert.return_value = mock_image
@@ -150,7 +150,7 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         mock_image.save.assert_called_once_with(pdf_path, save_all=True, append_images=[])
         
         temp_img_dir = os.path.join(os.path.dirname(pdf_path), "temp_images_" + os.path.basename(pdf_path))
-        mock_rmtree.assert_called_once_with(temp_img_dir)
+        mock_rmtree.assert_called_once_with(temp_img_dir, ignore_errors=True)
 
 if __name__ == '__main__':
     unittest.main()

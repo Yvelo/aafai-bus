@@ -79,6 +79,8 @@ These tests verify that different parts of the system work together correctly. A
 - **On-Demand & Auto-Shutdown:** Designed to be started by a client and automatically powers off the VM when idle.
 - **Gunicorn & Systemd:** Ready for production deployment using industry-standard tools.
 - **Google Scholar Search (`search_google_scholar`):** A new action that performs advanced searches on Google Scholar. It scrapes article details including title, link, snippet, authors (with links to their Scholar profiles, organization, and citation counts where available), publication details, and PDF links. It supports various search parameters (all words, exact phrase, author, publication, date range) and handles pagination up to a configurable maximum number of articles. The author matching logic is designed to be flexible, correctly identifying authors even when names are abbreviated (e.g., a search for "Richard Handler" will correctly match with "R Handler").
+- **DocSend Downloader (`docsend_download`):** An action to download documents from DocSend links, handling passcodes if required.
+- **Droom Scraper (`scrape_droom`):** An action to scrape detailed information from Droom.org profile pages.
 
 ## 6. Setup & Deployment
 
@@ -179,6 +181,35 @@ Recursively navigates to a URL and extracts all visible text from linked pages w
   "params": {
     "url": "string",
     "max_depth": "integer"
+  }
+}
+```
+
+### `docsend_download`
+
+Downloads a document from a DocSend link, handling optional passcodes.
+
+**Input JSON Format:**
+```json
+{
+  "action": "docsend_download",
+  "params": {
+    "url": "string",
+    "passcode": "string (optional)"
+  }
+}
+```
+
+### `scrape_droom`
+
+Scrapes detailed information from a Droom.org profile page.
+
+**Input JSON Format:**
+```json
+{
+  "action": "scrape_droom",
+  "params": {
+    "url": "string"
   }
 }
 ```

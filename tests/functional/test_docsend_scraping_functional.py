@@ -35,8 +35,9 @@ def test_docsend_scraping_live():
     USER_EMAIL = os.environ.get('USER_EMAIL')
     DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', 'scraped_document') # Default name if not set
 
-    # Create a temporary directory for the test output
-    test_output_dir = os.path.join(os.path.dirname(__file__), 'test_output_docsend')
+    # Use C:/temp as the base for test outputs to avoid long path issues
+    base_path = 'C:/temp'
+    test_output_dir = os.path.join(base_path, 'test_output_docsend')
     
     if os.path.exists(test_output_dir):
         shutil.rmtree(test_output_dir, ignore_errors=True)

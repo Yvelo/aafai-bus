@@ -37,8 +37,9 @@ def test_drooms_scraping_live():
     DROOMS_USERNAME = os.environ.get('DROOMS_USERNAME')
     DROOMS_PASSWORD = os.environ.get('DROOMS_PASSWORD')
 
-    # Create a temporary directory for the test output
-    test_output_dir = os.path.join(os.path.dirname(__file__), 'test_output_drooms')
+    # Use C:/temp as the base for test outputs to avoid long path issues
+    base_path = 'C:/temp'
+    test_output_dir = os.path.join(base_path, 'test_output_drooms')
     
     # Robust cleanup: Handle cases where files might be locked by a previous run
     if os.path.exists(test_output_dir):
@@ -57,7 +58,8 @@ def test_drooms_scraping_live():
     params = {
         "url": DROOMS_URL,
         "username": DROOMS_USERNAME,
-        "password": DROOMS_PASSWORD
+        "password": DROOMS_PASSWORD,
+        "headless": False
     }
     
     # The job_context provides the output directory for the action
@@ -78,8 +80,8 @@ def test_drooms_scraping_live():
         assert result is not None, "The action did not return a result."
         assert result.get("status") == "complete", f"The action failed with message: {result.get('message')}"
 
-        # Check that some output was actually created
-        download_root = os.path.join(test_output_dir, 'drooms_download')
+        # The download root is now hardcoded in the action itself
+        download_root = 'C:/temp/drooms_scraping'
         assert os.path.exists(download_root), "The root download directory was not created."
         
         # Check if at least one PDF was created (this is a good sign)
