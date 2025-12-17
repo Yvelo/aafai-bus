@@ -59,7 +59,8 @@ def test_drooms_scraping_live():
         "url": DROOMS_URL,
         "username": DROOMS_USERNAME,
         "password": DROOMS_PASSWORD,
-        "headless": False
+        "headless": False,
+        "debug_mode": False  # Set to True to limit folder expansion for faster testing
     }
     
     # The job_context provides the output directory for the action
