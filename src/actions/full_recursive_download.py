@@ -59,7 +59,7 @@ def _setup_driver(job_download_dir):
     # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
 
-    return driver
+    return driver, service
 
 def _normalize_domain(domain):
     """Removes 'www.' from the beginning of a domain for consistent comparison."""
@@ -149,6 +149,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     os.makedirs(job_download_dir, exist_ok=True)
 
     driver = None
+    service = None
     crawled_data = []
     visited_urls = set() # Stores URLs that have been successfully crawled and their content extracted
     urls_to_visit = deque([(initial_url, 0)]) # (url, depth) - Queue of URLs to visit
@@ -158,7 +159,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     initial_domain = urlparse(initial_url).netloc
 
     try:
-        driver = _setup_driver(job_download_dir)
+        driver, service = _setup_driver(job_download_dir)
 
         while urls_to_visit:
             current_url, current_depth = urls_to_visit.popleft()
@@ -227,17 +228,16 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     finally:
         if driver:
             driver.quit()
-            # Add a small delay to allow processes to release file handles
-            time.sleep(1)
-            # Clean up the temporary directory
-            if hasattr(driver, 'temp_dir'):
-                try:
-                    shutil.rmtree(driver.temp_dir)
-                except OSError as e:
-                    logging.warning(f"Could not remove temporary directory {driver.temp_dir}: {e}")
-        # It's still a good practice to clean up the job-specific directory.
-        # However, it's commented out in the original script, so we'll respect that.
-        # shutil.rmtree(job_download_dir)
+        if service:
+            service.stop()
+        # Add a small delay to allow processes to release file handles
+        time.sleep(1)
+        # Clean up the temporary directory
+        if driver and hasattr(driver, 'temp_dir'):
+            try:
+                shutil.rmtree(driver.temp_dir)
+            except OSError as e:
+                logging.warning(f"Could not remove temporary directory {driver.temp_dir}: {e}")
 
     write_result_to_outbound(job_id, result)
 
