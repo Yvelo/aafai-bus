@@ -10,6 +10,7 @@ import os
 import time
 import re
 import shutil
+import base64
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -27,7 +28,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     document_name = params.get('document_name', 'scraped_document')
 
     if not all([url, user_email]):
-        result = {"status": "error", "message": "Missing required parameters: url or user_email."}
+        result = {"job_id": job_id, "status": "failed", "error": "Missing required parameters: url or user_email."}
         write_result_to_outbound(job_id, result)
         return
 
@@ -45,9 +46,25 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         
         if captured_slides:
             _compile_pdf(captured_slides, output_pdf_path)
-            result = {"status": "complete", "message": f"Successfully created PDF: {output_pdf_path}"}
+            with open(output_pdf_path, "rb") as pdf_file:
+                encoded_string = base64.b64encode(pdf_file.read()).decode('utf-8')
+            result = {
+                "job_id": job_id,
+                "status": "complete",
+                "result": {
+                    "downloaded_files": [
+                        {
+                            "filename": os.path.basename(output_pdf_path),
+                            "path": output_pdf_path,
+                            "size_bytes": os.path.getsize(output_pdf_path),
+                            "text": "PDF content is image-based and cannot be extracted as text.",
+                            "content_base64": encoded_string
+                        }
+                    ]
+                }
+            }
         else:
-            result = {"status": "error", "message": "No slides were captured."}
+            result = {"job_id": job_id, "status": "failed", "error": "No slides were captured."}
 
     except Exception as e:
         print(f"An error occurred during DocSend scraping: {e}")
@@ -55,7 +72,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             error_screenshot_path = os.path.join(download_dir, 'error_screenshot.png')
             driver.save_screenshot(error_screenshot_path)
             print(f"Saved error screenshot to {error_screenshot_path}")
-        result = {"status": "error", "message": str(e)}
+        result = {"job_id": job_id, "status": "failed", "error": str(e)}
 
     finally:
         if driver:
