@@ -35,7 +35,7 @@ class TestSearchGoogleScholarFunctional:
                 "author": "Olivier Lantz"
             },
             "max_number_of_articles": 5,
-            "fetch_author_details": "relevant",  # Keep test fast, don't fetch details
+            "fetch_author_details": "none",  # Keep test fast, don't fetch details
         }
         mock_write_result = MagicMock()
 
