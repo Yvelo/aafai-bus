@@ -57,14 +57,14 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
-    # Isolate Selenium Manager's driver cache
-    selenium_manager_cache_dir = os.path.join(job_download_dir, "selenium_manager_cache")
-    os.makedirs(selenium_manager_cache_dir, exist_ok=True)
-    os.environ['SE_CACHE_PATH'] = selenium_manager_cache_dir
+    # Isolate Selenium Manager's and webdriver-manager's driver cache
+    driver_cache_dir = os.path.join(job_download_dir, "driver_cache")
+    os.makedirs(driver_cache_dir, exist_ok=True)
+    os.environ['SE_CACHE_PATH'] = driver_cache_dir
 
     # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager().install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(path=driver_cache_dir).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(60)
