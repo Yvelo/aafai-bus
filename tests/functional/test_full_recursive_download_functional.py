@@ -1,44 +1,70 @@
-import json
+import pytest
+from unittest.mock import MagicMock
+import tempfile
+import shutil
 import os
-from unittest.mock import patch
+from src.actions.full_recursive_download import execute
 
-def test_receive_task_file_writing(client, app):
+@pytest.mark.functional
+class TestFullRecursiveDownloadFunctional:
     """
-    Test that the receive_task function writes the correct task file,
-    ignoring other file operations like the timestamp update.
+    Functional tests for the full_recursive_download action.
+    These tests run against live websites using a real browser.
+    They are marked as 'functional' and may be slower to run.
     """
-    task_data = {'action': 'test_action', 'params': {'foo': 'bar'}}
 
-    # Use a patch to inspect the calls to json.dump
-    with patch('src.server.json.dump') as mock_json_dump:
-        response = client.post('/inbound',
-                               data=json.dumps(task_data),
-                               content_type='application/json')
+    @pytest.fixture
+    def temp_dir(self):
+        """
+        Pytest fixture to create and clean up a temporary directory for tests.
+        This directory will be used for downloads and for webdriver-manager caching.
+        """
+        temp_download_dir = tempfile.mkdtemp()
 
-    assert response.status_code == 200
-    response_data = json.loads(response.data)
-    job_id = response_data.get('job_id')
-    assert job_id is not None
+        # Store the original WDM_HOME value if it exists
+        original_wdm_home = os.environ.get('WDM_HOME')
 
-    # Construct the expected path for the task file using os.path.join for OS compatibility
-    base_path = app.config['BASE_QUEUE_PATH']
-    inbound_dir = os.path.join(base_path, 'inbound')
+        # Set WDM_HOME to the temporary directory to ensure we have permissions
+        os.environ['WDM_HOME'] = temp_download_dir
 
-    # Find the call to json.dump that wrote the task file
-    task_dump_call = None
-    for call in mock_json_dump.call_args_list:
-        # The second argument to dump is the file handle
-        file_handle = call.args[1]
-        # The file handle's name attribute contains the full path
-        if file_handle.name.startswith(inbound_dir) and file_handle.name.endswith(f"{job_id}.json"):
-            task_dump_call = call
-            break
-    
-    assert task_dump_call is not None, f"json.dump was not called for a task file in '{inbound_dir}'"
+        try:
+            yield temp_download_dir
+        finally:
+            shutil.rmtree(temp_download_dir)
+            # Restore the original WDM_HOME value
+            if original_wdm_home:
+                os.environ['WDM_HOME'] = original_wdm_home
+            else:
+                del os.environ['WDM_HOME']
 
-    # Check the content that was passed to json.dump
-    dumped_data = task_dump_call.args[0]
-    assert dumped_data['action'] == 'test_action'
-    assert dumped_data['job_id'] == job_id
-    assert dumped_data['params'] == {'foo': 'bar'}
-    assert 'received_at' in dumped_data
+    def test_download_from_arxiv(self, temp_dir):
+        """
+        Tests a real download from the arXiv website to verify the scraper can handle
+        a live download task.
+        """
+        job_id = "functional-test-download-arxiv"
+        # Using a page with known PDF links for testing.
+        start_url = "https://arxiv.org/list/cs.AI/new"
+
+        params = {
+            "url": start_url,
+            "max_depth": 1,
+            "max_links": 5,
+            "file_match_pattern": "\\.pdf$"
+        }
+        mock_write_result = MagicMock()
+
+        execute(job_id, params, temp_dir, mock_write_result)
+
+        mock_write_result.assert_called_once()
+        _, result = mock_write_result.call_args[0]
+
+        assert result['job_id'] == job_id
+        assert result['status'] == 'complete'
+        assert 'error' not in result
+
+        # Verify that some files were downloaded
+        download_dir = os.path.join(temp_dir, job_id, "downloads")
+        assert os.path.exists(download_dir)
+        downloaded_files = os.listdir(download_dir)
+        assert len(downloaded_files) > 0
