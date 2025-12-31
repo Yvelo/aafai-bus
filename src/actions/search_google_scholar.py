@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.driver_cache import DriverCacheManager
 import tempfile
 from urllib.parse import urlencode, urlparse, parse_qs
 from collections import deque
@@ -60,11 +61,10 @@ def _setup_driver(job_download_dir):
     # Isolate webdriver-manager's driver cache to a local, writable directory
     driver_cache_dir = os.path.join(job_download_dir, "driver_cache")
     os.makedirs(driver_cache_dir, exist_ok=True)
-    os.environ['WDM_LOCAL'] = driver_cache_dir
-
+    
     # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager().install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(60)
@@ -185,7 +185,7 @@ def _is_author_relevant(author_name, relevant_author_query):
     if not author_first_names or not query_first_names:
         return False
 
-    # Check for initial-based matches.
+    # Check for initial-based.
     # This is bidirectional: works if the query has initials and the result has full names, or vice-versa.
     
     # Form the initial strings for both the author and the query.
