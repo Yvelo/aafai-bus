@@ -18,7 +18,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from PIL import Image
 from io import BytesIO
 
-def run(params, job_context):
+def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Main entry point for the docsend_scraping action.
     """
@@ -27,12 +27,11 @@ def run(params, job_context):
     document_name = params.get('document_name', 'scraped_document')
 
     if not all([url, user_email]):
-        return {"status": "error", "message": "Missing required parameters: url or user_email."}
+        result = {"status": "error", "message": "Missing required parameters: url or user_email."}
+        write_result_to_outbound(job_id, result)
+        return
 
-    output_dir = job_context.get('job_output_dir', os.getcwd())
-    os.makedirs(output_dir, exist_ok=True)
-    
-    output_pdf_path = os.path.join(output_dir, f"{document_name}.pdf")
+    output_pdf_path = os.path.join(download_dir, f"{document_name}.pdf")
 
     driver = None
     try:
@@ -46,22 +45,23 @@ def run(params, job_context):
         
         if captured_slides:
             _compile_pdf(captured_slides, output_pdf_path)
-            return {"status": "complete", "message": f"Successfully created PDF: {output_pdf_path}"}
+            result = {"status": "complete", "message": f"Successfully created PDF: {output_pdf_path}"}
         else:
-            return {"status": "error", "message": "No slides were captured."}
+            result = {"status": "error", "message": "No slides were captured."}
 
     except Exception as e:
         print(f"An error occurred during DocSend scraping: {e}")
-        if driver and output_dir:
-            error_screenshot_path = os.path.join(output_dir, 'error_screenshot.png')
+        if driver and download_dir:
+            error_screenshot_path = os.path.join(download_dir, 'error_screenshot.png')
             driver.save_screenshot(error_screenshot_path)
             print(f"Saved error screenshot to {error_screenshot_path}")
-        return {"status": "error", "message": str(e)}
+        result = {"status": "error", "message": str(e)}
 
     finally:
         if driver:
             driver.quit()
             print("\nWebDriver closed.")
+        write_result_to_outbound(job_id, result)
 
 def _setup_driver():
     """Sets up the Selenium WebDriver."""

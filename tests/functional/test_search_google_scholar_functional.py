@@ -38,16 +38,12 @@ class TestSearchGoogleScholarFunctional:
             "fetch_author_details": "none",  # Keep test fast, don't fetch details
         }
         mock_write_result = MagicMock()
-
-        print('DEBUG 1')
         print(params)
 
         execute(job_id, params, temp_dir, mock_write_result)
 
         mock_write_result.assert_called_once()
         _, result = mock_write_result.call_args[0]
-
-        print('DEBUG 2')
         print(result)
 
         assert result['job_id'] == job_id

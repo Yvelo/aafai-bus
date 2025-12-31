@@ -29,7 +29,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 # --- Main Action Function ---
 
-def run(params, job_context):
+def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Main entry point for the drooms_scraping action.
     """
@@ -40,7 +40,9 @@ def run(params, job_context):
     debug_mode = params.get('debug_mode', False)
 
     if not all([url, username, password]):
-        return {"status": "error", "message": "Missing required parameters: url, username, or password."}
+        result = {"status": "error", "message": "Missing required parameters: url, username, or password."}
+        write_result_to_outbound(job_id, result)
+        return
 
     download_root = 'C:/temp/drooms_scraping'
     os.makedirs(download_root, exist_ok=True)
@@ -59,22 +61,20 @@ def run(params, job_context):
         all_items = _gather_all_items(driver)
         _process_all_items(driver, all_items, download_root)
 
-        return {"status": "complete", "message": f"D-Rooms scraping completed. Files saved to {download_root}"}
+        result = {"status": "complete", "message": f"D-Rooms scraping completed. Files saved to {download_root}"}
 
     except Exception as e:
         print(f"An error occurred during D-Rooms scraping: {e}")
         if driver:
-            output_dir = job_context.get('job_output_dir')
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                error_screenshot_path = os.path.join(output_dir, 'error_screenshot.png')
-                driver.save_screenshot(error_screenshot_path)
-                print(f"Saved error screenshot to {error_screenshot_path}")
-        return {"status": "error", "message": str(e)}
+            error_screenshot_path = os.path.join(download_dir, 'error_screenshot.png')
+            driver.save_screenshot(error_screenshot_path)
+            print(f"Saved error screenshot to {error_screenshot_path}")
+        result = {"status": "error", "message": str(e)}
 
     finally:
         if driver:
             driver.quit()
+        write_result_to_outbound(job_id, result)
 
 
 # --- Helper Functions ---

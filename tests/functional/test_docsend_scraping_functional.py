@@ -18,6 +18,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 
 # Add the src directory to the path to allow importing the action
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
@@ -51,16 +52,19 @@ def test_docsend_scraping_live():
         "document_name": DOCUMENT_NAME
     }
     
-    job_context = {
-        "job_output_dir": test_output_dir
-    }
+    job_id = str(uuid.uuid4())
+    
+    # --- Mock callback function ---
+    result_holder = {}
+    def mock_write_result(job_id, result_data):
+        result_holder['result'] = result_data
 
     # --- Execute the Action ---
-    result = None
     try:
-        result = docsend_scraping.run(params, job_context)
+        docsend_scraping.execute(job_id, params, test_output_dir, mock_write_result)
     finally:
         # --- Assertions and Cleanup ---
+        result = result_holder.get('result')
         print("--- Functional Test Result ---")
         print(result)
 
