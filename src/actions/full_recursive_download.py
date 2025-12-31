@@ -9,6 +9,7 @@ import tempfile
 from urllib.parse import urlparse, urljoin, urlunparse
 from collections import deque
 import time # Import the time module
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -50,7 +51,7 @@ def _setup_driver(job_download_dir):
 
     # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager().install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(60)
