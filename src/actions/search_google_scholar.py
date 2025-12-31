@@ -348,6 +348,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     Performs an advanced Google Scholar search based on the provided parameters,
     scrapes the results, and returns them in the outbound JSON message.
     """
+    logging.info(f"Executing search_google_scholar for job {job_id} with params: {json.dumps(params, indent=2)}")
+
     query_params = params.get('query', {})
     if not query_params:
         raise ValueError("'query' parameter is missing or empty for 'search_google_scholar'")
@@ -378,6 +380,24 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
             # Log the page source immediately after loading (first 2000 chars)
             logging.debug(f"Page source after navigating to URL:\n{driver.page_source[:2000]}...")
+
+            # **FIX**: Handle author-only search results which might land on a profile page.
+            # If the query is primarily an author search and no other major filters are present,
+            # Google Scholar may show a list of author profiles instead of articles.
+            is_author_only_search = query_params.get("author") and not (query_params.get("all_words") or query_params.get("exact_phrase"))
+            if start_index == 0 and is_author_only_search:
+                try:
+                    # Look for the main author profile link on the page
+                    author_profile_link = driver.find_element(By.CSS_SELECTOR, 'h3.gs_rt a[href*="/citations?user="]')
+                    profile_url = author_profile_link.get_attribute('href')
+                    logging.info(f"Author-only search detected. Found author profile page. Navigating to full publication list: {profile_url}")
+                    driver.get(profile_url)
+                    # After navigating, wait for the "Show more" button to ensure the article list is loaded.
+                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "gsc_bpf_more")))
+                    logging.info("Successfully navigated to author's full publication page.")
+                except (NoSuchElementException, TimeoutException):
+                    # If the element isn't found, it's likely a normal search results page. Proceed as usual.
+                    logging.info("Author-only search did not lead to a profile page, or profile page was not found. Proceeding with standard scraping.")
 
             # On the first page (start_index == 0), try to get the total estimated results
             if start_index == 0:
@@ -449,6 +469,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             except OSError as e:
                 logging.warning(f"Could not remove job download directory {job_download_dir}: {e}")
 
+    logging.info(f"Sending result for job {job_id}: {json.dumps(result, indent=2)}")
     write_result_to_outbound(job_id, result)
 
 
@@ -458,7 +479,7 @@ if __name__ == '__main__':
     import uuid
     import json
 
-    # Set logging level to INFO to see detailed messages
+    # Set logging level to INFO to see detailed messages printed to the console.
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     # Example usage:

@@ -35,14 +35,20 @@ class TestSearchGoogleScholarFunctional:
                 "author": "Olivier Lantz"
             },
             "max_number_of_articles": 5,
-            "fetch_author_details": "none",  # Keep test fast, don't fetch details
+            "fetch_author_details": "relevant",  # Keep test fast, don't fetch details
         }
         mock_write_result = MagicMock()
+
+        print('DEBUG 1')
+        print(params)
 
         execute(job_id, params, temp_dir, mock_write_result)
 
         mock_write_result.assert_called_once()
         _, result = mock_write_result.call_args[0]
+
+        print('DEBUG 2')
+        print(result)
 
         assert result['job_id'] == job_id
         assert result['status'] == 'complete'
