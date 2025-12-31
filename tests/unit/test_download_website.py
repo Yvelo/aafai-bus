@@ -34,7 +34,9 @@ def test_run_missing_parameters():
 @patch('actions.drooms_scraping._expand_all_folders')
 @patch('actions.drooms_scraping._login')
 @patch('actions.drooms_scraping._setup_driver')
-def test_run_success(mock_setup_driver, mock_login, mock_expand, mock_wait, mock_makedirs):
+@patch('actions.drooms_scraping._gather_all_items')
+@patch('actions.drooms_scraping._process_all_items')
+def test_run_success(mock_process_all, mock_gather_all, mock_setup_driver, mock_login, mock_expand, mock_wait, mock_makedirs):
     """
     Tests the success scenario for the drooms_scraping action by mocking helper functions.
     """
@@ -57,7 +59,7 @@ def test_run_success(mock_setup_driver, mock_login, mock_expand, mock_wait, mock
     mock_setup_driver.assert_called_once()
     mock_login.assert_called_once_with(mock_driver, params['url'], params['username'], params['password'])
     mock_wait.assert_called()
-    mock_expand.assert_called_once_with(mock_driver)
+    mock_expand.assert_called_once_with(mock_driver, debug_mode=False)
     
     assert result['status'] == 'complete'
     assert 'D-Rooms scraping completed' in result['message']

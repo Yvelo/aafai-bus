@@ -226,6 +226,7 @@ def _parse_single_article(article_element, driver, fetch_author_details, relevan
     snippet = snippet_element.text
 
     author_info_container = article_element.find_element(By.CSS_SELECTOR, 'div.gs_a')
+    raw_author_line = author_info_container.text
     
     authors_list = []
     publication_details_str = ""
@@ -305,6 +306,7 @@ def _parse_single_article(article_element, driver, fetch_author_details, relevan
         "link": link,
         "snippet": snippet,
         "authors": authors_list,
+        "raw_author_line": raw_author_line,
         "publication_details": publication_details_str,
         "pdf_link": pdf_link
     }
@@ -351,7 +353,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         raise ValueError("'query' parameter is missing or empty for 'search_google_scholar'")
 
     fetch_author_details = params.get('fetch_author_details', 'none') # 'none', 'all', 'relevant'
-    max_articles = params.get('max_articles', DEFAULT_MAX_NUMBER_OF_ARTICLES)
+    max_articles = params.get('max_number_of_articles', DEFAULT_MAX_NUMBER_OF_ARTICLES)
     relevant_author_query = query_params.get('author') if fetch_author_details == 'relevant' else None
 
     # Create a job-specific directory for driver logs and cache

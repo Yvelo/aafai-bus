@@ -4,7 +4,7 @@ Unit tests for the drooms_scraping action.
 """
 
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock, call, ANY
 import os
 import sys
 
@@ -46,7 +46,7 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         mock_makedirs.assert_called_once_with(download_root, exist_ok=True)
         mock_setup_driver.assert_called_once()
         mock_login.assert_called_once_with(mock_driver, params['url'], params['username'], params['password'])
-        mock_expand_all.assert_called_once_with(mock_driver)
+        mock_expand_all.assert_called_once_with(mock_driver, debug_mode=False)
         mock_gather_all.assert_called_once_with(mock_driver)
         mock_process_all.assert_called_once_with(mock_driver, mock_gather_all.return_value, download_root)
         
@@ -77,11 +77,12 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         self.assertEqual(result['message'], 'Login Failed')
         mock_driver.quit.assert_called_once()
 
+    @patch('actions.drooms_scraping.ActionChains')
     @patch('actions.drooms_scraping.WebDriverWait')
     @patch('actions.drooms_scraping.os.makedirs')
     @patch('actions.drooms_scraping.os.path.exists', return_value=False)
     @patch('actions.drooms_scraping._process_document')
-    def test_process_all_items_hierarchy(self, mock_process_doc, mock_exists, mock_makedirs, mock_wait):
+    def test_process_all_items_hierarchy(self, mock_process_doc, mock_exists, mock_makedirs, mock_wait, mock_action_chains):
         """
         Test that _process_all_items correctly creates a directory structure based on order index.
         """
@@ -134,7 +135,7 @@ class TestDroomsScrapingUnit(unittest.TestCase):
         mock_page1.size = {'width': 800, 'height': 1000} 
         
         mock_viewer.find_element.return_value = mock_page1
-        mock_viewer.find_elements.side_effect = [[mock_page1], [], [], []]
+        mock_viewer.find_elements.side_effect = [[mock_page1], [mock_page1], [mock_page1], [mock_page1], [mock_page1], []]
         
         mock_image = MagicMock()
         mock_image.convert.return_value = mock_image
