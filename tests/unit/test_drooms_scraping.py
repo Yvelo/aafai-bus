@@ -118,8 +118,9 @@ class TestDroomsScrapingUnit(unittest.TestCase):
     @patch('actions.drooms_scraping.WebDriverWait')
     @patch('actions.drooms_scraping.shutil.rmtree')
     @patch('actions.drooms_scraping.Image.open')
+    @patch('actions.drooms_scraping.os.path.getsize', return_value=1)
     @patch('actions.drooms_scraping.os.path.exists', return_value=True)
-    def test_process_document_pdf_creation(self, mock_exists, mock_image_open, mock_rmtree, mock_wait, mock_sleep):
+    def test_process_document_pdf_creation(self, mock_exists, mock_getsize, mock_image_open, mock_rmtree, mock_wait, mock_sleep):
         """
         Test the _process_document helper to ensure it correctly captures pages and creates a PDF.
         """
