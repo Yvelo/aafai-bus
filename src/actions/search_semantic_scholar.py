@@ -18,7 +18,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 SEMANTIC_SCHOLAR_BASE_URL = "https://www.semanticscholar.org/search"
 
 # Default maximum number of articles to scrape if not overridden by inbound message
-DEFAULT_MAX_NUMBER_OF_ARTICLES = 100
+DEFAULT_MAX_NUMBER_OF_ARTICLES = 1000
 DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
 
 
@@ -327,7 +327,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 time.sleep(0.5)
                 next_button.click()
                 page += 1
-                time.sleep(2)
+                time.sleep(3.5)
             except (NoSuchElementException, ElementClickInterceptedException):
                 logging.info("No next page button found or it was not clickable. Ending pagination.")
                 break
