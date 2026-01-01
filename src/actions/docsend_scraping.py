@@ -9,12 +9,13 @@ It handles the email authentication, captures each slide, and compiles them into
 import os
 import time
 import re
-import shutil
 import base64
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support import expected_conditions
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from PIL import Image
 from io import BytesIO
@@ -26,6 +27,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     url = params.get('url')
     user_email = params.get('user_email')
     document_name = params.get('document_name', 'scraped_document')
+    result = {}
 
     if not all([url, user_email]):
         result = {"job_id": job_id, "status": "failed", "error": "Missing required parameters: url or user_email."}
@@ -78,17 +80,22 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         if driver:
             driver.quit()
             print("\nWebDriver closed.")
-        write_result_to_outbound(job_id, result)
+        if result:
+            write_result_to_outbound(job_id, result)
 
 def _setup_driver():
     """Sets up the Selenium WebDriver."""
     options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--start-maximized')
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     print("Initializing WebDriver...")
-    return webdriver.Chrome(options=options)
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service, options=options)
 
 def _navigate_and_authenticate(driver, url, email_address):
     """Navigates to the URL and handles the email submission form."""
@@ -96,7 +103,7 @@ def _navigate_and_authenticate(driver, url, email_address):
     driver.get(url)
     try:
         email_input = WebDriverWait(driver, 15).until(
-            EC.visibility_of_element_located((By.ID, "link_auth_form_email"))
+            expected_conditions.visibility_of_element_located((By.ID, "link_auth_form_email"))
         )
         print(f"Entering email address: {email_address}")
         email_input.send_keys(email_address)
@@ -109,19 +116,19 @@ def _wait_for_viewer_and_dismiss_cookie(driver):
     """Waits for the presentation viewer and handles the cookie banner."""
     next_button_selector = (By.ID, "nextPageButton")
     try:
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located(next_button_selector))
+        WebDriverWait(driver, 20).until(expected_conditions.presence_of_element_located(next_button_selector))
         print("Presentation viewer loaded.")
 
         print("Looking for the cookie banner iframe...")
         cookie_iframe = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='ccpa_iframe']"))
+            expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='ccpa_iframe']"))
         )
         driver.switch_to.frame(cookie_iframe)
         print("Switched to iframe. Clicking 'Accept All'...")
 
         robust_button_xpath = "//button[contains(., 'Accept All') or contains(., 'Tout accepter')]"
         accept_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, robust_button_xpath))
+            expected_conditions.element_to_be_clickable((By.XPATH, robust_button_xpath))
         )
         accept_button.click()
         print("Cookie banner dismissed.")
@@ -144,7 +151,7 @@ def _capture_all_slides(driver):
         try:
             next_button_selector = (By.ID, "nextPageButton")
             next_button_element = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(next_button_selector)
+                expected_conditions.element_to_be_clickable(next_button_selector)
             )
 
             current_page_element = driver.find_element(By.ID, "page-number")
@@ -154,7 +161,7 @@ def _capture_all_slides(driver):
 
             active_content_selector = (By.CSS_SELECTOR, ".item.active .viewer_content-container")
             content_element = WebDriverWait(driver, 10).until(
-                EC.visibility_of_element_located(active_content_selector)
+                expected_conditions.visibility_of_element_located(active_content_selector)
             )
 
             png_data = content_element.screenshot_as_png
@@ -162,7 +169,7 @@ def _capture_all_slides(driver):
             captured_slides.append(slide_image.convert('RGB'))
             print(f"Captured slide {current_slide_num}/{total_slides if total_slides > 0 else '?'}")
 
-            if total_slides > 0 and current_slide_num >= total_slides:
+            if total_slides and current_slide_num >= total_slides:
                 print("Reached the last slide. Finishing capture.")
                 break
 
@@ -181,7 +188,7 @@ def _get_total_slides(driver):
     """Determines the total number of slides from the page indicator."""
     try:
         page_indicator_element = WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.CLASS_NAME, "toolbar-page-indicator"))
+            expected_conditions.visibility_of_element_located((By.CLASS_NAME, "toolbar-page-indicator"))
         )
         numbers = re.findall(r'\d+', page_indicator_element.text)
         if numbers:
