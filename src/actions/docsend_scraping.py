@@ -24,6 +24,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from PIL import Image
 from io import BytesIO
 
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Main entry point for the docsend_scraping action.
@@ -44,13 +45,13 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     service = None
     try:
         driver, service = _setup_driver(download_dir)
-        
+
         _navigate_and_authenticate(driver, url, user_email)
-        
+
         _wait_for_viewer_and_dismiss_cookie(driver)
-        
+
         captured_slides = _capture_all_slides(driver)
-        
+
         if captured_slides:
             _compile_pdf(captured_slides, output_pdf_path)
             with open(output_pdf_path, "rb") as pdf_file:
@@ -98,6 +99,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         if result:
             write_result_to_outbound(job_id, result)
 
+
 def _setup_driver(download_dir):
     """Sets up the Selenium WebDriver."""
     options = Options()
@@ -126,15 +128,17 @@ def _setup_driver(download_dir):
     os.makedirs(driver_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(),
+                      service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     print("Initializing WebDriver...")
     driver = webdriver.Chrome(service=service, options=options)
-    
+
     # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
 
     return driver, service
+
 
 def _navigate_and_authenticate(driver, url, email_address):
     """Navigates to the URL and handles the email submission form."""
@@ -150,6 +154,7 @@ def _navigate_and_authenticate(driver, url, email_address):
         print("Submitted email. Waiting for presentation viewer...")
     except TimeoutException:
         print("Email submission form not found. Assuming public access.")
+
 
 def _wait_for_viewer_and_dismiss_cookie(driver):
     """Waits for the presentation viewer and handles the cookie banner."""
@@ -179,11 +184,12 @@ def _wait_for_viewer_and_dismiss_cookie(driver):
         print("Switched focus back to the main page.")
         time.sleep(1)
 
+
 def _capture_all_slides(driver):
     """Browses through the presentation and captures each slide."""
     captured_slides = []
     total_slides = _get_total_slides(driver)
-    
+
     print("\nStarting slide capture...")
     current_slide_num = 0
     while True:
@@ -223,6 +229,7 @@ def _capture_all_slides(driver):
 
     return captured_slides
 
+
 def _get_total_slides(driver):
     """Determines the total number of slides from the page indicator."""
     try:
@@ -237,6 +244,7 @@ def _get_total_slides(driver):
     except (TimeoutException, IndexError):
         print("Could not determine total number of slides.")
     return 0
+
 
 def _compile_pdf(slides, output_pdf_path):
     """Compiles a list of PIL Image objects into a single PDF file."""
