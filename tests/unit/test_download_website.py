@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 import os
 import tempfile
 import shutil
@@ -32,7 +32,7 @@ class TestDownloadWebsite(unittest.TestCase):
 
         execute(self.job_id, self.params, self.test_dir, self.write_result_to_outbound)
 
-        mock_setup_driver.assert_called_once_with(headless=True)
+        mock_setup_driver.assert_called_once_with(ANY, headless=True)
         mock_login.assert_called_once_with(mock_driver, self.params["url"], self.params["username"], self.params["password"])
         mock_expand_all_folders.assert_called_once()
         mock_gather_all_items.assert_called_once()

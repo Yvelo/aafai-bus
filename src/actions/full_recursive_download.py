@@ -64,6 +64,18 @@ def _setup_driver(job_download_dir):
     service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    # --- Evasion Tactic: Hide the "navigator.webdriver" flag ---
+    # This is a critical step to appear more like a regular user.
+    # We execute this script before the website's own scripts can run.
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+              get: () => undefined
+            })
+        """
+    })
+
     driver.set_page_load_timeout(60)
 
     # Store the temporary directory path so it can be cleaned up later

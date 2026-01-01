@@ -52,10 +52,13 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     os.makedirs(download_root, exist_ok=True)
     print(f"Using download root: {download_root}")
 
+    # Create a job-specific directory for driver logs and cache
+    job_download_dir = os.path.join(download_dir, job_id)
+    os.makedirs(job_download_dir, exist_ok=True)
+
     driver = None
-    service = None
     try:
-        driver, service = _setup_driver(download_dir, headless=headless)
+        driver = _setup_driver(job_download_dir, headless=headless)
         _login(driver, url, username, password)
         
         WebDriverWait(driver, 60).until(
@@ -79,10 +82,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     finally:
         if driver:
             driver.quit()
-        if service:
-            service.stop()
-        time.sleep(1)
         if driver and hasattr(driver, 'temp_dir'):
+            time.sleep(1) # Give time for processes to release file handles
             try:
                 shutil.rmtree(driver.temp_dir)
             except OSError as e:
