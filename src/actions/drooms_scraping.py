@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 import time
-
+import tempfile
 from PIL import Image
 from selenium import webdriver
 from selenium.common.exceptions import (ElementNotInteractableException,
@@ -26,6 +26,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.driver_cache import DriverCacheManager
 
 # --- Main Action Function ---
 
@@ -49,8 +53,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     print(f"Using download root: {download_root}")
 
     driver = None
+    service = None
     try:
-        driver = _setup_driver(headless=headless)
+        driver, service = _setup_driver(download_dir, headless=headless)
         _login(driver, url, username, password)
         
         WebDriverWait(driver, 60).until(
@@ -74,24 +79,55 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     finally:
         if driver:
             driver.quit()
+        if service:
+            service.stop()
+        time.sleep(1)
+        if driver and hasattr(driver, 'temp_dir'):
+            try:
+                shutil.rmtree(driver.temp_dir)
+            except OSError as e:
+                print(f"Warning: Could not remove temporary directory {driver.temp_dir}: {e}")
         write_result_to_outbound(job_id, result)
 
 
 # --- Helper Functions ---
 
-def _setup_driver(headless=True):
+def _setup_driver(download_dir, headless=True):
     """Sets up the Selenium WebDriver."""
-    options = webdriver.ChromeOptions()
+    options = Options()
     if headless:
         options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-crash-reporter")
     # Use a large, fixed window size to accommodate both portrait and landscape
     # documents at a high resolution, preventing the need for dynamic resizing.
     options.add_argument("--window-size=2000,3000")
     
+    temp_dir = tempfile.mkdtemp()
+    os.environ['HOME'] = temp_dir
+
+    user_data_dir = os.path.join(temp_dir, "user-data")
+    disk_cache_dir = os.path.join(temp_dir, "cache")
+    crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
+
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
+    options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
+
+    driver_cache_dir = os.path.join(download_dir, "driver_cache")
+    os.makedirs(driver_cache_dir, exist_ok=True)
+
+    chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+
     print("Initializing WebDriver...")
-    return webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(service=service, options=options)
+    
+    driver.temp_dir = temp_dir
+
+    return driver, service
 
 def _login(driver, url, username, password):
     """Handles the D-Rooms login process."""
