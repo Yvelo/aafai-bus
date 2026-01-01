@@ -73,6 +73,7 @@ These tests verify that different parts of the system work together correctly. A
 
 ## 5. Features
 
+- **Automatic File Purging:** A scheduled job runs daily to automatically delete old files and directories from the queue and download folders (`inbound`, `outbound`, `consumed`, `failed`, and `downloads`). This cleanup process prevents the server from running out of disk space by removing any data older than seven days.
 - **Dynamic Action System:** Add new capabilities by simply dropping a Python file into the `actions/` directory.
 - **File-Based Queue:** A simple, durable, and transparent queueing system.
 - **Asynchronous Processing:** Uses `APScheduler` with a thread pool to handle multiple tasks concurrently.
