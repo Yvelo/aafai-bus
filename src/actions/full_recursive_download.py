@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urljoin, urlunparse
 from collections import deque
 import time # Import the time module
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium_stealth import stealth
 from webdriver_manager.core.driver_cache import DriverCacheManager
 
 
@@ -30,11 +31,6 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-in-process-stack-traces")
     chrome_options.add_argument("--disable-logging")
     chrome_options.add_argument("--disable-dev-tools")
-    chrome_options.add_argument("--log-level=3")
-
-    # Add a realistic User-Agent to mimic a regular browser
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-    # Set a window size to mimic a desktop browser
     chrome_options.add_argument("--window-size=1920,1080") # Set a consistent window size
 
     # Create a single, persistent temporary directory for this driver instance.
@@ -65,16 +61,17 @@ def _setup_driver(job_download_dir):
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    # --- Evasion Tactic: Hide the "navigator.webdriver" flag ---
-    # This is a critical step to appear more like a regular user.
-    # We execute this script before the website's own scripts can run.
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-              get: () => undefined
-            })
-        """
-    })
+    # --- Apply selenium-stealth ---
+    # This function applies a series of patches to the driver to make it
+    # appear more like a regular user's browser, helping to bypass bot detection.
+    stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+            )
 
     driver.set_page_load_timeout(60)
 
