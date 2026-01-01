@@ -20,7 +20,8 @@ DEFAULT_MAX_DEPTH = 1 # Default maximum recursion depth
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
+        chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")

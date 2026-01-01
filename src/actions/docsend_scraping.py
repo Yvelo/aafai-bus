@@ -103,7 +103,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 def _setup_driver(download_dir):
     """Sets up the Selenium WebDriver."""
     options = Options()
-    options.add_argument('--headless')
+    # Run in headless mode by default, but allow overriding for debugging
+    if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
+        options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')

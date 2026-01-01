@@ -40,7 +40,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     url = params.get('url')
     username = params.get('username')
     password = params.get('password')
-    headless = params.get('headless', True)
+    headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
     debug_mode = params.get('debug_mode', False)
 
     if not all([url, username, password]):
