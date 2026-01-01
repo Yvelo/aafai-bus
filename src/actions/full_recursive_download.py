@@ -26,6 +26,15 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-crash-reporter")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-in-process-stack-traces")
+    chrome_options.add_argument("--disable-logging")
+    chrome_options.add_argument("--disable-dev-tools")
+    chrome_options.add_argument("--log-level=3")
+
+    # Add a realistic User-Agent to mimic a regular browser
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+    # Set a window size to mimic a desktop browser
     chrome_options.add_argument("--window-size=1920,1080") # Set a consistent window size
 
     # Create a single, persistent temporary directory for this driver instance.
