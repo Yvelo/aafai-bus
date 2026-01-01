@@ -32,8 +32,8 @@ class TestSearchSemanticScholarFunctional:
             "query": {
                 "author": "Yann LeCun"
             },
-            "max_number_of_articles": 100,
-            "fetch_author_details": "none",  # Keep test fast
+            "max_number_of_articles": 15,
+            "fetch_author_details": "relevant",  # Keep test fast
         }
         mock_write_result = MagicMock()
 

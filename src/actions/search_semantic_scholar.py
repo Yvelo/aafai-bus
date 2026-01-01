@@ -9,6 +9,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.driver_cache import DriverCacheManager
 import tempfile
 from urllib.parse import urlencode, urljoin
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
 import re
@@ -107,7 +109,13 @@ def _get_author_details(driver, author_url):
     original_window = driver.current_window_handle
     driver.execute_script("window.open('');")
     driver.switch_to.window(driver.window_handles[-1])
-    details = {"affiliation": None, "total_citations": None, "h_index": None}
+    details = {
+        "affiliation": None,
+        "publications": None,
+        "h_index": None,
+        "total_citations": None,
+        "highly_influential_citations": None
+    }
     try:
         driver.get(author_url)
         time.sleep(2)
@@ -115,10 +123,30 @@ def _get_author_details(driver, author_url):
             details["affiliation"] = driver.find_element(By.CSS_SELECTOR, 'ul[data-test-id="author-affiliations"] li').text.strip()
         except NoSuchElementException:
             logging.warning(f"Could not find affiliation for author at {author_url}")
-        stats_elements = driver.find_elements(By.CSS_SELECTOR, '.author-detail-card__stats-row .author-detail-card__stats-value')
-        if len(stats_elements) >= 3:
-            details["total_citations"] = stats_elements[0].text.strip()
-            details["h_index"] = stats_elements[2].text.strip()
+
+        stats_rows = driver.find_elements(By.CSS_SELECTOR, '.author-detail-card__stats-row')
+        for row in stats_rows:
+            try:
+                label_element = row.find_element(By.CSS_SELECTOR, '.author-detail-card__stats-row__label')
+                label = label_element.text.strip()
+                value_str = row.find_element(By.CSS_SELECTOR, '.author-detail-card__stats-row__value').text.strip()
+                try:
+                    value = int(value_str.replace(',', ''))
+                except ValueError:
+                    value = value_str
+
+                if label == 'Publications':
+                    details['publications'] = value
+                elif label == 'h-index':
+                    details['h_index'] = value
+                elif label == 'Citations':
+                    details['total_citations'] = value
+                elif label == 'Highly Influential Citations':
+                    details['highly_influential_citations'] = value
+            except NoSuchElementException:
+                logging.warning(f"Could not parse a stat row on author page {author_url}")
+                continue
+
     except Exception as e:
         logging.error(f"Error fetching author details from {author_url}: {e}")
     finally:
@@ -278,8 +306,21 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         search_url = _build_semantic_scholar_url(query_params)
         logging.info(f"Navigating to Semantic Scholar URL: {search_url}")
-        driver.get(search_url)
-        time.sleep(2)
+        try:
+            driver.get(search_url)
+        except TimeoutException:
+            logging.warning("Initial page load timed out. The page might be partially loaded.")
+
+        # Handle cookie banner if it appears
+        try:
+            wait = WebDriverWait(driver, 5)
+            cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-test-id="cookie-banner__dismiss-btn"]')))
+            logging.info("Cookie banner found. Clicking 'ACCEPT & CONTINUE'.")
+            cookie_button.click()
+            time.sleep(10)  # Give a moment for the banner to disappear
+        except TimeoutException:
+            logging.info("Cookie banner not found or not clickable within the timeout period.")
+
         while len(all_results) < max_articles:
             if page == 1:
                 estimated_from_header = _get_total_estimated_results(driver)
@@ -290,8 +331,23 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 if query_params.get("author"):
                     matched_authors = _extract_matched_authors(driver)
                     if matched_authors:
-                        estimated_articles = sum(author.get('publications', 0) for author in matched_authors)
-                        estimated_citations = sum(author.get('citations', 0) for author in matched_authors)
+                        if fetch_author_details != 'none':
+                            logging.info(f"Fetching details for {len(matched_authors)} matched authors.")
+                            for author in matched_authors:
+                                author_url = author.get("author_url")
+                                if author_url:
+                                    if author_url not in author_profile_cache:
+                                        should_fetch = (fetch_author_details == 'all') or \
+                                                       (fetch_author_details == 'relevant' and _is_author_relevant(author.get('name', ''), relevant_author_query))
+                                        if should_fetch:
+                                            details = _get_author_details(driver, author_url)
+                                            author_profile_cache[author_url] = details
+                                        else:
+                                            author_profile_cache[author_url] = {}
+                                    details = author_profile_cache.get(author_url, {})
+                                    author.update(details)
+                        estimated_articles = sum(author.get('publications') or 0 for author in matched_authors)
+                        estimated_citations = sum(author.get('total_citations') or author.get('citations') or 0 for author in matched_authors)
                         logging.info(f"Total estimated articles from matched authors: {estimated_articles}")
                         logging.info(f"Total estimated citations from matched authors: {estimated_citations}")
                     else:
