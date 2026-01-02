@@ -117,11 +117,12 @@ def _setup_driver(download_dir, headless=True):
     options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
-    driver_cache_dir = os.path.join(download_dir, "driver_cache")
-    os.makedirs(driver_cache_dir, exist_ok=True)
+    # Use a persistent cache for WebDriver Manager
+    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
+    os.makedirs(persistent_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=driver_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     print("Initializing WebDriver...")
     driver = webdriver.Chrome(service=service, options=options)
