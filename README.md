@@ -81,6 +81,7 @@ These tests verify that different parts of the system work together correctly. A
 - **Gunicorn & Systemd:** Ready for production deployment using industry-standard tools.
 - **Google Scholar Search (`search_google_scholar`):** A new action that performs advanced searches on Google Scholar. It scrapes article details including title, link, snippet, authors (with links to their Scholar profiles, organization, and citation counts where available), publication details, and PDF links. It supports various search parameters (all words, exact phrase, author, publication, date range) and handles pagination up to a configurable maximum number of articles. The author matching logic is designed to be flexible, correctly identifying authors even when names are abbreviated (e.g., a search for "Richard Handler" will correctly match with "R Handler").
 - **Semantic Scholar Search (`search_semantic_scholar`):** Performs an advanced search on Semantic Scholar. It scrapes article details including title, link, snippet, authors (with profile URLs and optionally affiliation, total citations, and h-index), publication details, PDF links, and citation counts. It supports various search parameters and can fetch detailed profiles for all or only relevant authors.
+- **USPTO Patent Search (`search_uspto`):** A new action that performs advanced searches on the USPTO patent database. It scrapes patent details including title, link, publication date, inventors, assignees, application number, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped.
 - **DocSend Downloader (`docsend_download`):** An action to download documents from DocSend links, handling passcodes if required.
 - **Droom Scraper (`scrape_droom`):** An action to scrape detailed information from Droom.org profile pages.
 
@@ -144,6 +145,24 @@ Polls for a task result.
 ## 9. Actions
 
 The following actions are available via the `/inbound` endpoint.
+
+### `search_uspto`
+
+Performs an advanced search on the USPTO patent database and scrapes the results.
+
+**Input JSON Format:**
+```json
+{
+  "action": "search_uspto",
+  "params": {
+    "queries": [
+      ["query1 keyword1", "query1 keyword2"],
+      ["query2 keyword1"]
+    ],
+    "max_number_of_patents": "integer"
+  }
+}
+```
 
 ### `search_semantic_scholar`
 
