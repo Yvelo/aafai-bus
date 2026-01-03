@@ -49,25 +49,37 @@ def _setup_driver(job_download_dir, download_dir):
     if headless:
         options.add_argument('--headless=new')
 
-    # Common browser options
+    # Common browser options for stability in containers
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-setuid-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--remote-debugging-port=9222")
+
     options.add_argument("--disable-crash-reporter")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-in-process-stack-traces")
     options.add_argument("--disable-logging")
     options.add_argument("--log-level=3")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-    options.add_argument("--window-.size=4000,2000")
+    options.add_argument("--window-size=4000,2000")
 
     temp_dir = tempfile.mkdtemp()
     user_data_dir = os.path.join(temp_dir, "user-data")
+    data_path = os.path.join(temp_dir, "data-path")
+    cache_path = os.path.join(temp_dir, "cache-path")
+
+    os.makedirs(user_data_dir, exist_ok=True)
+    os.makedirs(data_path, exist_ok=True)
+    os.makedirs(cache_path, exist_ok=True)
 
     # undetected-chromedriver will handle driver download and patching.
     driver = uc.Chrome(
         options=options,
-        user_data_dir=user_data_dir
+        user_data_dir=user_data_dir,
+        data_path=data_path,
+        browser_executable_path=os.environ.get("CHROME_BROWSER_PATH"),
+        driver_executable_path=os.environ.get("CHROME_DRIVER_PATH")
     )
 
     driver.set_page_load_timeout(30)
@@ -111,10 +123,11 @@ def _parse_single_patent(patent_element):
     return patent_data
 
 
-def execute(job_id, params, download_dir, write_result_to_outbound):
+def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=True):
     """
     Performs a Espacenet patent search based on the provided queries,
     scrapes the results, and returns them in the outbound JSON message.
+    If `quit_driver` is False, the WebDriver instance is not closed and is returned by the function.
     """
     logging.info(f"Executing search_espacenet for job {job_id} with params: {json.dumps(params, indent=2)}")
     queries = params.get('queries', [])
@@ -191,7 +204,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         logging.error(f"An error occurred during Espacenet search for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
     finally:
-        if driver:
+        if driver and quit_driver:
             driver.quit()
             time.sleep(1)
             if hasattr(driver, 'temp_dir'):
@@ -199,7 +212,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     shutil.rmtree(driver.temp_dir)
                 except OSError as e:
                     logging.warning(f"Could not remove temporary directory {driver.temp_dir}: {e}")
-        if os.path.exists(job_download_dir):
+        if os.path.exists(job_download_dir) and quit_driver:
             try:
                 shutil.rmtree(job_download_dir)
             except OSError as e:
@@ -207,6 +220,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     logging.info(f"Sending result for job {job_id}: {json.dumps(result, indent=2)}")
     write_result_to_outbound(job_id, result)
+    if not quit_driver:
+        return driver
 
 
 if __name__ == '__main__':

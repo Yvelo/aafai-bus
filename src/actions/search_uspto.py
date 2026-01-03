@@ -28,17 +28,21 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options = Options()
     if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
         chrome_options.add_argument("--headless=new")
+
+    # Common browser options for stability in containers
     chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--remote-debugging-port=9222")
+
     chrome_options.add_argument("--disable-crash-reporter")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-in-process-stack-traces")
     chrome_options.add_argument("--disable-logging")
-    chrome_options.add_argument("--disable-dev-tools")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-    chrome_options.add_argument("--window-size=1920,1080") # Taller window
+    chrome_options.add_argument("--window-size=1920,1080")
 
     # Anti-scraping measures
     chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -56,7 +60,7 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
     # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
+    persistent_cache_dir = os.path.join(temp_dir, "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
