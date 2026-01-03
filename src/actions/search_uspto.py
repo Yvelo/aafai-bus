@@ -38,7 +38,7 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument("--disable-dev-tools")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-    chrome_options.add_argument("--window-size=4000,2000") # Taller window
+    chrome_options.add_argument("--window-size=1920,1080") # Taller window
 
     # Anti-scraping measures
     chrome_options.add_argument('--disable-blink-features=AutomationControlled')

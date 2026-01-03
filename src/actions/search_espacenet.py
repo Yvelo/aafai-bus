@@ -89,14 +89,14 @@ def _parse_single_patent(patent_element):
     patent_data = {}
     
     try:
-        title_element = patent_element.find_element(By.CSS_SELECTOR, 'span.item__content--title--dYTuyzV6')
+        title_element = patent_element.find_element(By.CSS_SELECTOR, 'span[class*="item__content--title"]')
         patent_data['title'] = title_element.text
     except (NoSuchElementException, StaleElementReferenceException):
         patent_data['title'] = None
 
     try:
         # Extract patent number from the subtitle
-        subtitle_element = patent_element.find_element(By.CSS_SELECTOR, 'div.h3--pyjtCj5Y.item__content--subtitle--mFxM6gqw')
+        subtitle_element = patent_element.find_element(By.CSS_SELECTOR, 'div[class*="item__content--subtitle"]')
         patent_data['patent_number'] = subtitle_element.find_element(By.TAG_NAME, 'span').text
     except (NoSuchElementException, StaleElementReferenceException):
         return None # Cannot proceed without a patent number
@@ -104,9 +104,9 @@ def _parse_single_patent(patent_element):
     if patent_data.get('patent_number'):
         patent_data['link'] = f"https://worldwide.espacenet.com/patent/search?q=pn%3D{patent_data['patent_number']}"
 
-    patent_data['date_published'] = _get_field(patent_element, 'div.h3--pyjtCj5Y.item__content--subtitle--mFxM6gqw span:nth-child(2)')
-    patent_data['applicant'] = _get_field(patent_element, 'div.h3--pyjtCj5Y.item__content--subtitle--mFxM6gqw div[aria-label="Applicant"] span')
-    patent_data['abstract'] = _get_field(patent_element, 'div.item__content-abstract--hRLdiD1n')
+    patent_data['date_published'] = _get_field(patent_element, 'div[class*="item__content--subtitle"] span:nth-child(2)')
+    patent_data['applicant'] = _get_field(patent_element, 'div[class*="item__content--subtitle"] div[aria-label="Applicant"] span')
+    patent_data['abstract'] = _get_field(patent_element, 'div[class*="item__content-abstract"]')
 
     return patent_data
 
@@ -142,21 +142,21 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             logging.info(f"Performing search for query: '{query}'")
 
             try:
-                search_input = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input.search__input--qMUfUT1V")))
+                search_input = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[class*='search__input']")))
                 search_input.clear()
                 search_input.send_keys(query)
                 time.sleep(1)
-                search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.search__button--xs1xtYK9")))
+                search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='search__button']")))
                 search_button.click()
                 logging.info("Search submitted.")
-                WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.CSS_SELECTOR, "article.item--wSceB4di")))
+                WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.CSS_SELECTOR, "article[class*='item--']")))
                 logging.info("Search results loaded.")
             except (TimeoutException, NoSuchElementException) as e:
                 logging.warning(f"Failed to perform search or find results for '{query}': {e}", exc_info=True)
                 continue
 
             try:
-                scrollable_element = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.publications-list--9wu4rcWN")))
+                scrollable_element = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[class*='publications-list--']")))
                 logging.info("Scrollable results container found.")
             except TimeoutException:
                 logging.error("Could not find the scrollable results container.")
@@ -165,7 +165,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             last_patent_count = -1
             while last_patent_count != len(all_patents) and len(all_patents) < max_patents:
                 last_patent_count = len(all_patents)
-                patent_elements = driver.find_elements(By.CSS_SELECTOR, "article.item--wSceB4di")
+                patent_elements = driver.find_elements(By.CSS_SELECTOR, "article[class*='item--']")
                 for element in patent_elements:
                     if len(all_patents) >= max_patents: break
                     parsed_patent = _parse_single_patent(element)

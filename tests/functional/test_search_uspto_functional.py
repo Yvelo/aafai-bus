@@ -33,7 +33,7 @@ class TestSearchUsptoFunctional:
                 ["artificial intelligence", "neoantigen", "immunotherapy"],
                 ["artificial intelligence", "pancreatic", "immunotherapy"]
             ],
-            "max_number_of_patents": 10,
+            "max_number_of_patents": 5,
         }
         mock_write_result = MagicMock()
 
@@ -48,4 +48,4 @@ class TestSearchUsptoFunctional:
 
         patents = result['result']['patents']
         assert len(patents) > 0
-        assert len(patents) <= 25
+        assert len(patents) <= 5

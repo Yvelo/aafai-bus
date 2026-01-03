@@ -30,7 +30,7 @@ class TestSearchEspacenetFunctional:
         job_id = "functional-test-keyword-search"
         params = {
             "queries": [
-                ["neoantigen", "tumor", "irradiated", "CAR-T", "5FU"],
+                ["neoantigen", "tumor", "irradiated", "CAR-T", "5FU"]
             ],
             "max_number_of_patents": 100
         }
