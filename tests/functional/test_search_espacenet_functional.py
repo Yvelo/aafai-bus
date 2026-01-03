@@ -35,16 +35,20 @@ class TestSearchEspacenetFunctional:
             "max_number_of_patents": 100
         }
         mock_write_result = MagicMock()
+        driver = None
+        try:
+            driver = execute(job_id, params, temp_dir, mock_write_result, quit_driver=False)
 
-        execute(job_id, params, temp_dir, mock_write_result)
+            mock_write_result.assert_called_once()
+            _, result = mock_write_result.call_args[0]
 
-        mock_write_result.assert_called_once()
-        _, result = mock_write_result.call_args[0]
+            assert result['job_id'] == job_id
+            assert result['status'] == 'complete'
+            assert 'error' not in result
 
-        assert result['job_id'] == job_id
-        assert result['status'] == 'complete'
-        assert 'error' not in result
-
-        patents = result['result']['patents']
-        assert len(patents) > 0
-        assert len(patents) <= 100
+            patents = result['result']['patents']
+            assert len(patents) > 0
+            assert len(patents) <= 100
+        finally:
+            if driver:
+                driver.quit()

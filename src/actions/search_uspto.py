@@ -56,7 +56,7 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
     # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
+    persistent_cache_dir = os.path.join(temp_dir, "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
