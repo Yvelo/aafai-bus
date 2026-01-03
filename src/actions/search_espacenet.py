@@ -24,7 +24,6 @@ if sys.version_info >= (3, 12):
         logging.warning("Could not apply distutils monkey patch: 'packaging' module not found.")
 # END: Monkey patch for distutils
 
-import undetected_chromedriver as uc
 from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
 import tempfile
@@ -42,7 +41,23 @@ DEFAULT_MAX_NUMBER_OF_PATENTS = 1000
 
 
 def _setup_driver(job_download_dir):
-    """Configures and returns a headless Chrome WebDriver instance using undetected-chromedriver."""
+    """
+    Configures and returns a headless Chrome WebDriver instance using undetected-chromedriver.
+    This function handles the permission issue by setting a temporary HOME directory
+    *before* importing and initializing undetected-chromedriver.
+    """
+    # Create a single, persistent temporary directory for this driver instance.
+    temp_dir = tempfile.mkdtemp()
+
+    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process *before*
+    # importing undetected_chromedriver. This forces uc to create its profiles and
+    # caches within our temporary directory, avoiding permission errors in
+    # restricted environments like /var/www.
+    os.environ['HOME'] = temp_dir
+
+    # Import uc here to ensure it respects the new HOME directory
+    import undetected_chromedriver as uc
+
     options = uc.ChromeOptions()
     is_headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
 
@@ -58,25 +73,10 @@ def _setup_driver(job_download_dir):
     options.add_argument("--log-level=3")
     options.add_argument("--window-size=1920, 1080")
 
-    # Create a single, persistent temporary directory for this driver instance.
-    temp_dir = tempfile.mkdtemp()
-
-    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process.
-    # This forces uc to create its profiles and caches within our temporary directory,
-    # avoiding permission errors in restricted environments like /var/www.
-    os.environ['HOME'] = temp_dir
-
-    # Define paths within our new temporary HOME directory.
-    # undetected-chromedriver will use these paths relative to the new HOME.
-    user_data_dir = os.path.join(temp_dir, ".config", "google-chrome")
-    data_path = os.path.join(temp_dir, ".local", "share", "undetected_chromedriver")
-
-    # The driver_executable_path will be determined automatically by uc within the data_path.
-    # We do not pin the version_main, allowing uc to auto-detect the required version.
+    # The driver will now automatically use paths within the temp_dir HOME.
+    # Explicitly setting user_data_dir and data_path is no longer needed.
     driver = uc.Chrome(
         options=options,
-        user_data_dir=user_data_dir,
-        data_path=data_path,
         headless=is_headless
     )
 
