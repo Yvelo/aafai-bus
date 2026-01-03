@@ -25,6 +25,7 @@ if sys.version_info >= (3, 12):
 # END: Monkey patch for distutils
 
 import undetected_chromedriver as uc
+from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
 import tempfile
 from selenium.webdriver.support.ui import WebDriverWait
@@ -77,6 +78,17 @@ def _setup_driver(job_download_dir):
         user_data_dir=user_data_dir,
         data_path=data_path,
         headless=is_headless
+    )
+
+    # Apply stealth settings to make the browser look more human
+    stealth(
+        driver,
+        languages=["en-US", "en"],
+        vendor="Google Inc.",
+        platform="Win32",
+        webgl_vendor="Intel Inc.",
+        renderer="Intel Iris OpenGL Engine",
+        fix_hairline=True,
     )
 
     driver.set_page_load_timeout(60)
