@@ -28,11 +28,13 @@ class TestSearchEspacenetUnit:
         mock_search_button = MagicMock()
         mock_scrollable_div = MagicMock()
         mock_first_result_for_wait = MagicMock()
+        mock_initial_load_element = MagicMock()
 
         # --- Mock WebDriverWait ---
         mock_wait_instance = mock_wait.return_value
         mock_wait_instance.until.side_effect = [
-            mock_search_input,
+            mock_initial_load_element,  # For initial page load
+            mock_search_input,          # For finding search input before typing
             mock_search_button,
             mock_first_result_for_wait,
             mock_scrollable_div,
@@ -122,11 +124,13 @@ class TestSearchEspacenetUnit:
         # --- Mocks for driver-level elements ---
         mock_search_input = MagicMock()
         mock_search_button = MagicMock()
+        mock_initial_load_element = MagicMock()
 
         # --- Mock WebDriverWait ---
         mock_wait_instance = mock_wait.return_value
         mock_wait_instance.until.side_effect = [
-            mock_search_input,
+            mock_initial_load_element,  # For initial page load
+            mock_search_input,          # For finding search input before typing
             mock_search_button,
             TimeoutException("No results found")
         ]

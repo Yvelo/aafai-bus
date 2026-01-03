@@ -5,6 +5,7 @@ import sys
 from unittest.mock import MagicMock
 
 # BEGIN: Monkey patch for distutils
+# This is required for undetected-chromedriver to work with Python 3.12+
 if sys.version_info >= (3, 12):
     try:
         import packaging.version
@@ -30,9 +31,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
-import re
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
-from selenium.webdriver.common.action_chains import ActionChains
 
 # Base URL for Espacenet
 ESPACENET_BASE_URL = "https://worldwide.espacenet.com/"
@@ -41,48 +40,40 @@ ESPACENET_BASE_URL = "https://worldwide.espacenet.com/"
 DEFAULT_MAX_NUMBER_OF_PATENTS = 1000
 
 
-def _setup_driver(job_download_dir, download_dir):
+def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance using undetected-chromedriver."""
     options = uc.ChromeOptions()
+    is_headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
 
-    headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
-    if headless:
-        options.add_argument('--headless=new')
-
-    # Common browser options for stability in containers
+    # Common browser options for stability
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-setuid-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--remote-debugging-port=9222")
-
     options.add_argument("--disable-crash-reporter")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-in-process-stack-traces")
     options.add_argument("--disable-logging")
+    options.add_argument("--disable-dev-tools")
     options.add_argument("--log-level=3")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--window-size=4000,2000")
 
+    # Create a single, persistent temporary directory for this driver instance.
     temp_dir = tempfile.mkdtemp()
+
+    # Define paths within our new temporary directory
     user_data_dir = os.path.join(temp_dir, "user-data")
-    data_path = os.path.join(temp_dir, "data-path")
-    cache_path = os.path.join(temp_dir, "cache-path")
+    data_path = os.path.join(temp_dir, "uc-data")
 
-    os.makedirs(user_data_dir, exist_ok=True)
-    os.makedirs(data_path, exist_ok=True)
-    os.makedirs(cache_path, exist_ok=True)
-
-    # undetected-chromedriver will handle driver download and patching.
+    # The driver_executable_path will be determined automatically by uc within the data_path.
+    # We do not pin the version_main, allowing uc to auto-detect the required version.
     driver = uc.Chrome(
         options=options,
         user_data_dir=user_data_dir,
         data_path=data_path,
-        browser_executable_path=os.environ.get("CHROME_BROWSER_PATH"),
-        driver_executable_path=os.environ.get("CHROME_DRIVER_PATH")
+        headless=is_headless
     )
 
-    driver.set_page_load_timeout(30)
+    driver.set_page_load_timeout(60)
     driver.temp_dir = temp_dir  # Store temp_dir for later cleanup
     return driver
 
@@ -142,13 +133,19 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
 
     try:
         # --- Stage 1: Main search to collect patent metadata ---
-        driver = _setup_driver(job_download_dir, download_dir)
+        driver = _setup_driver(job_download_dir)
 
         logging.info(f"Navigating to Espacenet URL: {ESPACENET_BASE_URL}")
         try:
             driver.get(ESPACENET_BASE_URL)
+            # Wait for the page to load and potentially for Cloudflare to clear.
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[class*='search__input']"))
+            )
+            logging.info("Main search page loaded successfully.")
         except TimeoutException:
-            logging.warning("Initial page load timed out, but continuing.")
+            logging.warning("Initial page load timed out or Cloudflare challenge did not resolve. Continuing, but may fail.")
+
 
         for query_keywords in queries:
             query = " AND ".join(query_keywords)

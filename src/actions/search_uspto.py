@@ -23,34 +23,37 @@ USPTO_BASE_URL = "https://ppubs.uspto.gov/pubwebapp/"
 DEFAULT_MAX_NUMBER_OF_PATENTS = 1000
 
 
-def _setup_driver(job_download_dir, download_dir):
+def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
     chrome_options = Options()
     if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
         chrome_options.add_argument("--headless=new")
-
-    # Common browser options for stability in containers
+    
+    # Common browser options for stability
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--remote-debugging-port=9222")
-
     chrome_options.add_argument("--disable-crash-reporter")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-in-process-stack-traces")
     chrome_options.add_argument("--disable-logging")
+    chrome_options.add_argument("--disable-dev-tools")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1920,1080")
 
-    # Anti-scraping measures
+    # Anti-scraping measures from original implementation
     chrome_options.add_argument('--disable-blink-features=AutomationControlled')
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
+    # Create a single, persistent temporary directory for this driver instance.
     temp_dir = tempfile.mkdtemp()
 
+    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process.
+    os.environ['HOME'] = temp_dir
+
+    # Define paths within our new temporary HOME directory
     user_data_dir = os.path.join(temp_dir, "user-data")
     disk_cache_dir = os.path.join(temp_dir, "cache")
     crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
@@ -60,15 +63,19 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
     # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(temp_dir, "drivers")
+    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
-
+    
+    # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
     service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.set_page_load_timeout(30)
+    driver.set_page_load_timeout(60)
+
+    # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
+
     return driver
 
 
@@ -135,7 +142,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     try:
         # --- Stage 1: Main search to collect patent metadata ---
-        driver = _setup_driver(job_download_dir, download_dir)
+        driver = _setup_driver(job_download_dir)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         logging.info(f"Navigating to USPTO URL: {USPTO_BASE_URL}")
