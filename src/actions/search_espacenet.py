@@ -60,9 +60,15 @@ def _setup_driver(job_download_dir):
     # Create a single, persistent temporary directory for this driver instance.
     temp_dir = tempfile.mkdtemp()
 
-    # Define paths within our new temporary directory
-    user_data_dir = os.path.join(temp_dir, "user-data")
-    data_path = os.path.join(temp_dir, "uc-data")
+    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process.
+    # This forces uc to create its profiles and caches within our temporary directory,
+    # avoiding permission errors in restricted environments like /var/www.
+    os.environ['HOME'] = temp_dir
+
+    # Define paths within our new temporary HOME directory.
+    # undetected-chromedriver will use these paths relative to the new HOME.
+    user_data_dir = os.path.join(temp_dir, ".config", "google-chrome")
+    data_path = os.path.join(temp_dir, ".local", "share", "undetected_chromedriver")
 
     # The driver_executable_path will be determined automatically by uc within the data_path.
     # We do not pin the version_main, allowing uc to auto-detect the required version.
@@ -129,6 +135,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
     job_download_dir = os.path.join(download_dir, job_id)
     os.makedirs(job_download_dir, exist_ok=True)
     driver = None
+    original_home = os.environ.get('HOME')
     all_patents = {}
 
     try:
@@ -202,18 +209,27 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
     finally:
         if driver and quit_driver:
+            temp_dir_to_clean = driver.temp_dir if hasattr(driver, 'temp_dir') else None
             driver.quit()
             time.sleep(1)
-            if hasattr(driver, 'temp_dir'):
+            if temp_dir_to_clean:
                 try:
-                    shutil.rmtree(driver.temp_dir)
+                    shutil.rmtree(temp_dir_to_clean)
                 except OSError as e:
-                    logging.warning(f"Could not remove temporary directory {driver.temp_dir}: {e}")
+                    logging.warning(f"Could not remove temporary directory {temp_dir_to_clean}: {e}")
         if os.path.exists(job_download_dir) and quit_driver:
             try:
                 shutil.rmtree(job_download_dir)
             except OSError as e:
                 logging.warning(f"Could not remove job download directory {job_download_dir}: {e}")
+        
+        # Restore original HOME environment variable
+        if original_home is None:
+            if 'HOME' in os.environ:
+                del os.environ['HOME']
+        else:
+            os.environ['HOME'] = original_home
+
 
     logging.info(f"Sending result for job {job_id}: {json.dumps(result, indent=2)}")
     write_result_to_outbound(job_id, result)
