@@ -56,7 +56,7 @@ def _setup_driver(job_download_dir):
     options.add_argument("--disable-logging")
     options.add_argument("--disable-dev-tools")
     options.add_argument("--log-level=3")
-    options.add_argument("--window-size=4000,2000")
+    options.add_argument("--window-size=1920, 1080")
 
     # Create a single, persistent temporary directory for this driver instance.
     temp_dir = tempfile.mkdtemp()
@@ -81,15 +81,16 @@ def _setup_driver(job_download_dir):
     )
 
     # Apply stealth settings to make the browser look more human
-    stealth(
-        driver,
-        languages=["en-US", "en"],
-        vendor="Google Inc.",
-        platform="Win32",
-        webgl_vendor="Intel Inc.",
-        renderer="Intel Iris OpenGL Engine",
-        fix_hairline=True,
-    )
+    if is_headless:
+        stealth(
+            driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
 
     driver.set_page_load_timeout(60)
     driver.temp_dir = temp_dir  # Store temp_dir for later cleanup
