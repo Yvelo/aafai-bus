@@ -88,7 +88,8 @@ def _setup_driver(job_download_dir):
     # Explicitly setting user_data_dir and data_path is no longer needed.
     driver = uc.Chrome(
         options=options,
-        headless=is_headless
+        headless=is_headless,
+        version_main=142
     )
 
     # Apply stealth settings to make the browser look more human
