@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import shutil
 import sys
 from unittest.mock import MagicMock
@@ -60,6 +61,16 @@ def _setup_driver(job_download_dir):
 
     options = uc.ChromeOptions()
     is_headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
+
+    # Add arguments to make the browser appear more human
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36')
+    options.add_argument('--profile-directory=Default')
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--lang=en-US")
+
 
     # Common browser options for stability
     options.add_argument("--no-sandbox")
@@ -175,7 +186,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
                 search_input = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[class*='search__input']")))
                 search_input.clear()
                 search_input.send_keys(query)
-                time.sleep(1)
+                time.sleep(random.uniform(0.5, 1.5))
                 search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[class*='search__button']")))
                 search_button.click()
                 logging.info("Search submitted.")
@@ -210,7 +221,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
                     logging.info(f"Reached max patents limit of {max_patents}.")
                     break
                 driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scrollable_element)
-                time.sleep(2)
+                time.sleep(random.uniform(1.5, 2.5))
             logging.info(f"Scraping finished for query '{query}'.")
         
         final_patents = list(all_patents.values())
