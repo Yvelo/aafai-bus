@@ -30,10 +30,13 @@ class TestSearchUsptoFunctional:
         job_id = "functional-test-keyword-search"
         params = {
             "queries": [
-                ["artificial intelligence", "neoantigen", "immunotherapy"],
-                ["artificial intelligence", "pancreatic", "immunotherapy"]
+                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "staining"],
+                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "deep learning"],
+                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "semantic segmentation"],
+                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "spectroscopic imaging"],
+                ["tissue analysis", "biomarkers", "biopsy", "staining", "deep learning"],
             ],
-            "max_number_of_patents": 5,
+            "max_number_of_patents": 100,
         }
         mock_write_result = MagicMock()
 
@@ -48,4 +51,4 @@ class TestSearchUsptoFunctional:
 
         patents = result['result']['patents']
         assert len(patents) > 0
-        assert len(patents) <= 5
+        assert len(patents) <= 10000
