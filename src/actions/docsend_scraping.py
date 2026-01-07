@@ -117,6 +117,10 @@ def _setup_driver(download_dir):
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
 
+    # Use a persistent cache for WebDriver Manager, resolved *before* changing HOME
+    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
+    os.makedirs(persistent_cache_dir, exist_ok=True)
+
     temp_dir = tempfile.mkdtemp()
     os.environ['HOME'] = temp_dir
 
@@ -127,10 +131,6 @@ def _setup_driver(download_dir):
     options.add_argument(f"--user-data-dir={user_data_dir}")
     options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
-
-    # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
-    os.makedirs(persistent_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
     service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(),
