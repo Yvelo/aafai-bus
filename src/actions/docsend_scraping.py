@@ -117,8 +117,8 @@ def _setup_driver(download_dir):
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
 
-    # Use a persistent cache for WebDriver Manager, resolved *before* changing HOME
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
+    # Use a persistent cache in the system's temp directory for WebDriver Manager
+    persistent_cache_dir = os.path.join(tempfile.gettempdir(), ".aafai-bus-cache", "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
     temp_dir = tempfile.mkdtemp()

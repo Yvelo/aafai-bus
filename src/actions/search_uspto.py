@@ -48,6 +48,10 @@ def _setup_driver(job_download_dir):
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
 
+    # Use a persistent cache in the system's temp directory for WebDriver Manager
+    persistent_cache_dir = os.path.join(tempfile.gettempdir(), ".aafai-bus-cache", "drivers")
+    os.makedirs(persistent_cache_dir, exist_ok=True)
+
     # Create a single, persistent temporary directory for this driver instance.
     temp_dir = tempfile.mkdtemp()
 
@@ -62,10 +66,6 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
-
-    # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
-    os.makedirs(persistent_cache_dir, exist_ok=True)
     
     # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
