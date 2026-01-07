@@ -51,7 +51,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         _navigate_and_authenticate(driver, url, user_email)
 
-        _wait_for_viewer_and_dismiss_cookie(driver)
+        _wait_for_viewer(driver)
 
         captured_slides = _capture_all_slides(driver)
 
@@ -150,45 +150,60 @@ def _navigate_and_authenticate(driver, url, email_address):
     """Navigates to the URL and handles the email submission form."""
     logging.info(f"Navigating to: {url}")
     driver.get(url)
+
+    # Handle cookie banners that may appear on page load
+    _handle_overlays(driver)
+
     try:
         email_input = WebDriverWait(driver, 15).until(
             expected_conditions.visibility_of_element_located((By.ID, "link_auth_form_email"))
         )
         logging.info(f"Entering email address: {email_address}")
         email_input.send_keys(email_address)
-        driver.find_element(By.CLASS_NAME, "js-auth-form_submit-button").click()
+
+        # Wait for the submit button to be clickable to avoid interception
+        submit_button = WebDriverWait(driver, 10).until(
+            expected_conditions.element_to_be_clickable((By.CLASS_NAME, "js-auth-form_submit-button"))
+        )
+        submit_button.click()
         logging.info("Submitted email. Waiting for presentation viewer...")
     except TimeoutException:
         logging.info("Email submission form not found. Assuming public access.")
 
 
-def _wait_for_viewer_and_dismiss_cookie(driver):
-    """Waits for the presentation viewer and handles the cookie banner."""
+def _wait_for_viewer(driver):
+    """Waits for the presentation viewer to load."""
     next_button_selector = (By.ID, "nextPageButton")
     try:
         WebDriverWait(driver, 20).until(expected_conditions.presence_of_element_located(next_button_selector))
         logging.info("Presentation viewer loaded.")
+    except TimeoutException as e:
+        logging.error("Presentation viewer did not load in time.")
+        raise e
 
-        logging.info("Looking for the cookie banner iframe...")
-        cookie_iframe = WebDriverWait(driver, 10).until(
+
+def _handle_overlays(driver):
+    """Handles potential overlays like cookie banners."""
+    try:
+        # A short wait is used here as this is called proactively.
+        cookie_iframe = WebDriverWait(driver, 5).until(
             expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='ccpa_iframe']"))
         )
         driver.switch_to.frame(cookie_iframe)
-        logging.info("Switched to iframe. Clicking 'Accept all'...")
+        logging.info("Switched to cookie banner iframe.")
 
         robust_button_xpath = "//button[contains(., 'Accept all') or contains(., 'Tout accepter')]"
-        accept_button = WebDriverWait(driver, 10).until(
+        accept_button = WebDriverWait(driver, 5).until(
             expected_conditions.element_to_be_clickable((By.XPATH, robust_button_xpath))
         )
         accept_button.click()
-        logging.info("Cookie banner dismissed.")
-
+        logging.info("Clicked 'Accept all' on cookie banner.")
+        time.sleep(1)  # Give time for banner to disappear
     except TimeoutException:
-        logging.warning("Could not find or interact with the cookie banner. Continuing anyway.")
+        logging.info("No cookie banner found or it was not interactable within the timeout.")
     finally:
+        # Always switch back to default content to avoid being stuck in an iframe
         driver.switch_to.default_content()
-        logging.info("Switched focus back to the main page.")
-        time.sleep(1)
 
 
 def _capture_all_slides(driver):
@@ -200,6 +215,9 @@ def _capture_all_slides(driver):
     current_slide_num = 0
     while True:
         try:
+            # Handle overlays that might appear on each slide
+            _handle_overlays(driver)
+
             next_button_selector = (By.ID, "nextPageButton")
             next_button_element = WebDriverWait(driver, 10).until(
                 expected_conditions.element_to_be_clickable(next_button_selector)
@@ -208,8 +226,8 @@ def _capture_all_slides(driver):
             current_page_element = driver.find_element(By.ID, "page-number")
             current_slide_num = int(current_page_element.text)
 
-            time.sleep(5)
-            _wait_for_viewer_and_dismiss_cookie(driver)
+            # A brief pause for content to render, though explicit waits are preferred
+            time.sleep(1)
 
             active_content_selector = (By.CSS_SELECTOR, ".item.active .viewer_content-container")
             content_element = WebDriverWait(driver, 10).until(
