@@ -19,6 +19,28 @@ class TestSearchUsptoUnit:
         mock_setup_driver.return_value = mock_driver
         mock_driver.get.return_value = None
 
+        # --- Mock Patent Detail Page Elements ---
+        mock_details_container = MagicMock()
+        mock_detail_element = MagicMock()
+        mock_detail_element.text = "Mocked Detail Text"
+        mock_details_container.find_element.return_value = mock_detail_element
+        mock_details_container.find_elements.return_value = [mock_detail_element]
+
+        # --- Mock driver's find_element and find_elements ---
+        mock_total_patents_element = MagicMock(text="2")
+        mock_scrollable_element = MagicMock()
+
+        def driver_find_element_side_effect(by, selector):
+            if selector == ".resultNumber":
+                return mock_total_patents_element
+            if selector == "div.slick-viewport":
+                return mock_scrollable_element
+            if selector == "div.docMetadata":
+                return mock_details_container
+            return MagicMock()
+
+        mock_driver.find_element.side_effect = driver_find_element_side_effect
+
         # --- Mock WebDriverWait and ActionChains ---
         mock_wait_instance = mock_wait.return_value
         mock_search_input = MagicMock()
@@ -27,16 +49,27 @@ class TestSearchUsptoUnit:
         mock_abstract_container.find_elements.return_value = [mock_abstract_paragraph]
 
         mock_wait_instance.until.side_effect = [
+            # --- Main search ---
             MagicMock(),  # 1. Cookie disclaimer
             MagicMock(),  # 2. Close pop-up
             mock_search_input,  # 3. Search input
             MagicMock(),  # 4. Search button
             MagicMock(),  # 5. Search results loaded
-            MagicMock(),  # 6. Scrollable element
-            TimeoutException(),  # 7a. Abstract cookie disclaimer (times out)
-            mock_abstract_container,  # 8a. Abstract container
-            TimeoutException(),  # 7b. Abstract cookie disclaimer (times out)
-            mock_abstract_container,  # 8b. Abstract container
+            mock_scrollable_element,  # 6. Scrollable element
+
+            # --- Abstract for Patent 1 ---
+            mock_search_input,       # 7. Search input for patent 1
+            MagicMock(),             # 8. Search button for patent 1
+            TimeoutException(),      # 9. Cookie disclaimer (times out)
+            TimeoutException(),      # 10. Close pop-up (times out)
+            mock_abstract_container, # 11. Abstract container for patent 1
+
+            # --- Abstract for Patent 2 ---
+            mock_search_input,       # 12. Search input for patent 2
+            MagicMock(),             # 13. Search button for patent 2
+            TimeoutException(),      # 14. Cookie disclaimer (times out)
+            TimeoutException(),      # 15. Close pop-up (times out)
+            mock_abstract_container, # 16. Abstract container for patent 2
         ]
         mock_actions_instance = mock_action_chains.return_value
         mock_actions_instance.click.return_value = mock_actions_instance
@@ -90,11 +123,13 @@ class TestSearchUsptoUnit:
             assert patents[0]['patent_number'] == "PN123"
             assert patents[0]['keyword_matches'] == 2
             assert patents[0]['abstract'] == "This is the abstract."
+            assert patents[0]['inventor'] == "Mocked Detail Text" # Check updated data
 
             assert patents[1]['title'] == "Test Patent 2"
             assert patents[1]['patent_number'] == "PN456"
             assert patents[1]['keyword_matches'] == 2
             assert patents[1]['abstract'] == "This is the abstract."
+            assert patents[1]['inventor'] == "Mocked Detail Text" # Check updated data
 
         finally:
             shutil.rmtree(temp_download_dir)

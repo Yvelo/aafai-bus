@@ -34,9 +34,9 @@ def test_docsend_scraping_live():
     It will access a DocSend link, enter an email, and scrape the document.
     """
     # --- Test Configuration ---
-    DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://quantilight.docsend.com/view/78vyywqbgjctw959')
+    DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://marble.docsend.com/view/njvfwjwvihvm4n89')
     USER_EMAIL = os.environ.get('USER_EMAIL', 'ylm@aaf.lu')
-    DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20251231 Quantilight Pitch Deck') # Default name if not set
+    DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20250106 Marble II Pitch Deck - Full') # Default name if not set
 
     # Use C:/temp as the base for test outputs to avoid long path issues
     base_path = 'C:/temp'

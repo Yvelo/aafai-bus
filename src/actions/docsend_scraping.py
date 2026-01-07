@@ -12,6 +12,8 @@ import re
 import base64
 import shutil
 import tempfile
+from time import sleep
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -171,9 +173,9 @@ def _wait_for_viewer_and_dismiss_cookie(driver):
             expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='ccpa_iframe']"))
         )
         driver.switch_to.frame(cookie_iframe)
-        print("Switched to iframe. Clicking 'Accept All'...")
+        print("Switched to iframe. Clicking 'Accept all'...")
 
-        robust_button_xpath = "//button[contains(., 'Accept All') or contains(., 'Tout accepter')]"
+        robust_button_xpath = "//button[contains(., 'Accept all') or contains(., 'Tout accepter')]"
         accept_button = WebDriverWait(driver, 10).until(
             expected_conditions.element_to_be_clickable((By.XPATH, robust_button_xpath))
         )
@@ -205,7 +207,8 @@ def _capture_all_slides(driver):
             current_page_element = driver.find_element(By.ID, "page-number")
             current_slide_num = int(current_page_element.text)
 
-            time.sleep(1.5)
+            time.sleep(5)
+            _wait_for_viewer_and_dismiss_cookie(driver)
 
             active_content_selector = (By.CSS_SELECTOR, ".item.active .viewer_content-container")
             content_element = WebDriverWait(driver, 10).until(
