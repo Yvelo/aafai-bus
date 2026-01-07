@@ -182,7 +182,7 @@ def _handle_overlays(driver):
         driver.switch_to.frame(cookie_iframe)
         logging.info("Switched to cookie banner iframe.")
 
-        robust_button_xpath = "//button[contains(., 'Accept all') or contains(., 'Tout accepter')]"
+        robust_button_xpath = "//button[contains(., 'Accept all') or contains(., 'Accept All') or contains(., 'Tout accepter')]"
         accept_button = WebDriverWait(driver, 10).until(
             expected_conditions.presence_of_element_located((By.XPATH, robust_button_xpath))
         )
