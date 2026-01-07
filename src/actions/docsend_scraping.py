@@ -23,7 +23,7 @@ from webdriver_manager.core.driver_cache import DriverCacheManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 from PIL import Image
 from io import BytesIO
 
@@ -91,9 +91,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             logging.info("\nWebDriver closed.")
         if service:
             service.stop()
-        # Add a small delay to allow processes to release file handles
         time.sleep(1)
-        # Clean up the temporary directory
         if driver and hasattr(driver, 'temp_dir'):
             try:
                 shutil.rmtree(driver.temp_dir)
@@ -106,32 +104,23 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 def _setup_driver(download_dir):
     """Sets up the Selenium WebDriver."""
     options = Options()
-    # Run in headless mode by default, but allow overriding for debugging
     if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
         options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
-    options.add_argument('--disable-crash-reporter')
-    options.add_argument('--start-maximized')
+    options.add_argument('--window-size=1920,1080')  # Set window size for consistency
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
 
-    # Use a persistent cache in the system's temp directory for WebDriver Manager
     persistent_cache_dir = os.path.join(tempfile.gettempdir(), ".aafai-bus-cache", "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
     temp_dir = tempfile.mkdtemp()
     os.environ['HOME'] = temp_dir
-
     user_data_dir = os.path.join(temp_dir, "user-data")
-    disk_cache_dir = os.path.join(temp_dir, "cache")
-    crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
-
     options.add_argument(f"--user-data-dir={user_data_dir}")
-    options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
-    options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
     chromedriver_log_path = os.path.join(download_dir, "chromedriver.log")
     service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(),
@@ -139,10 +128,7 @@ def _setup_driver(download_dir):
 
     logging.info("Initializing WebDriver...")
     driver = webdriver.Chrome(service=service, options=options)
-
-    # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
-
     return driver, service
 
 
@@ -150,8 +136,6 @@ def _navigate_and_authenticate(driver, url, email_address):
     """Navigates to the URL and handles the email submission form."""
     logging.info(f"Navigating to: {url}")
     driver.get(url)
-
-    # Handle cookie banners that may appear on page load
     _handle_overlays(driver)
 
     try:
@@ -161,7 +145,6 @@ def _navigate_and_authenticate(driver, url, email_address):
         logging.info(f"Entering email address: {email_address}")
         email_input.send_keys(email_address)
 
-        # Wait for the submit button to be clickable to avoid interception
         submit_button = WebDriverWait(driver, 10).until(
             expected_conditions.element_to_be_clickable((By.CLASS_NAME, "js-auth-form_submit-button"))
         )
@@ -169,6 +152,14 @@ def _navigate_and_authenticate(driver, url, email_address):
         logging.info("Submitted email. Waiting for presentation viewer...")
     except TimeoutException:
         logging.info("Email submission form not found. Assuming public access.")
+    except ElementClickInterceptedException:
+        logging.warning("Initial click failed, retrying after handling overlays again.")
+        _handle_overlays(driver)
+        submit_button = WebDriverWait(driver, 10).until(
+            expected_conditions.element_to_be_clickable((By.CLASS_NAME, "js-auth-form_submit-button"))
+        )
+        driver.execute_script("arguments[0].click();", submit_button)
+        logging.info("Submitted email with JS click. Waiting for presentation viewer...")
 
 
 def _wait_for_viewer(driver):
@@ -183,27 +174,29 @@ def _wait_for_viewer(driver):
 
 
 def _handle_overlays(driver):
-    """Handles potential overlays like cookie banners."""
+    """Handles potential overlays like cookie banners using a robust JS click."""
     try:
-        # A short wait is used here as this is called proactively.
-        cookie_iframe = WebDriverWait(driver, 5).until(
+        cookie_iframe = WebDriverWait(driver, 10).until(
             expected_conditions.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='ccpa_iframe']"))
         )
         driver.switch_to.frame(cookie_iframe)
         logging.info("Switched to cookie banner iframe.")
 
         robust_button_xpath = "//button[contains(., 'Accept all') or contains(., 'Tout accepter')]"
-        accept_button = WebDriverWait(driver, 5).until(
-            expected_conditions.element_to_be_clickable((By.XPATH, robust_button_xpath))
+        accept_button = WebDriverWait(driver, 10).until(
+            expected_conditions.presence_of_element_located((By.XPATH, robust_button_xpath))
         )
-        accept_button.click()
-        logging.info("Clicked 'Accept all' on cookie banner.")
-        time.sleep(1)  # Give time for banner to disappear
+        
+        logging.info("Attempting to click 'Accept all' on cookie banner with JS.")
+        driver.execute_script("arguments[0].click();", accept_button)
+        logging.info("Successfully clicked 'Accept all' on cookie banner with JS.")
+        
+        time.sleep(1)
     except TimeoutException:
         logging.info("No cookie banner found or it was not interactable within the timeout.")
     finally:
-        # Always switch back to default content to avoid being stuck in an iframe
         driver.switch_to.default_content()
+        logging.info("Switched focus back to the main page.")
 
 
 def _capture_all_slides(driver):
@@ -215,7 +208,6 @@ def _capture_all_slides(driver):
     current_slide_num = 0
     while True:
         try:
-            # Handle overlays that might appear on each slide
             _handle_overlays(driver)
 
             next_button_selector = (By.ID, "nextPageButton")
@@ -225,8 +217,6 @@ def _capture_all_slides(driver):
 
             current_page_element = driver.find_element(By.ID, "page-number")
             current_slide_num = int(current_page_element.text)
-
-            # A brief pause for content to render, though explicit waits are preferred
             time.sleep(1)
 
             active_content_selector = (By.CSS_SELECTOR, ".item.active .viewer_content-container")
@@ -250,7 +240,7 @@ def _capture_all_slides(driver):
             break
         except Exception as e:
             logging.error(f"An unexpected error occurred during slide navigation: {e}")
-            raise  # Re-raise the exception to be caught by the main run function
+            raise
 
     return captured_slides
 
