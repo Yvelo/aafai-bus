@@ -41,11 +41,6 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1920,1080")
 
-    # Anti-scraping measures
-    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-
     temp_dir = tempfile.mkdtemp()
 
     user_data_dir = os.path.join(temp_dir, "user-data")
@@ -302,7 +297,6 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     author_profile_cache = {}
     try:
         driver = _setup_driver(job_download_dir, download_dir)
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         search_url = _build_semantic_scholar_url(query_params)
         logging.info(f"Navigating to Semantic Scholar URL: {search_url}")
