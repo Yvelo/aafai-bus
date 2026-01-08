@@ -41,7 +41,12 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1920,1080")
 
+    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+
     temp_dir = tempfile.mkdtemp()
+    os.environ['HOME'] = temp_dir
 
     user_data_dir = os.path.join(temp_dir, "user-data")
     disk_cache_dir = os.path.join(temp_dir, "cache")
@@ -51,8 +56,8 @@ def _setup_driver(job_download_dir, download_dir):
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
-    # Use a persistent cache for WebDriver Manager
-    persistent_cache_dir = os.path.join(temp_dir, "drivers")
+    # Use a persistent cache for WebDriver Manager in a well-known location
+    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
