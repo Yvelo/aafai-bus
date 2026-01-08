@@ -59,7 +59,7 @@ def create_app(testing=False):
         # Create data directories
         os.makedirs(current_app.config['BASE_QUEUE_PATH'], exist_ok=True)
         os.makedirs(current_app.config['DOWNLOAD_DIR'], exist_ok=True)
-        for dir_name in ['inbound', 'outbound', 'consumed', 'failed']:
+        for dir_name in ['inbound', 'outbound', 'consumed', 'failed', 'processing']:
             os.makedirs(os.path.join(current_app.config['BASE_QUEUE_PATH'], dir_name), exist_ok=True)
         
         # Create code directories (if they don't exist)
@@ -184,6 +184,7 @@ def process_inbound_queue(app):
             return
 
         logging.info("Scheduler worker checking for tasks...")
+        processing_dir = os.path.join(base_path, 'processing')
         consumed_dir = os.path.join(base_path, 'consumed')
         failed_dir = os.path.join(base_path, 'failed')
         download_dir = current_app.config['DOWNLOAD_DIR']
@@ -191,10 +192,10 @@ def process_inbound_queue(app):
 
         task_filename = sorted(os.listdir(inbound_queue_dir))[0]
         task_filepath = os.path.join(inbound_queue_dir, task_filename)
-        consumed_filepath = os.path.join(consumed_dir, task_filename)
+        processing_filepath = os.path.join(processing_dir, task_filename)
 
         try:
-            shutil.move(task_filepath, consumed_filepath)
+            shutil.move(task_filepath, processing_filepath)
         except FileNotFoundError:
             logging.info(f"Task {task_filename} already claimed. Skipping.")
             return
@@ -206,7 +207,7 @@ def process_inbound_queue(app):
         task_to_process = None
         job_id = "unknown"
         try:
-            with open(consumed_filepath, 'r') as f:
+            with open(processing_filepath, 'r') as f:
                 task_to_process = json.load(f)
 
             job_id = task_to_process.get('job_id', 'unknown')
@@ -230,6 +231,10 @@ def process_inbound_queue(app):
 
             action_module.execute(job_id, params, download_dir, write_result_to_outbound)
 
+            # On success, move to consumed
+            consumed_filepath = os.path.join(consumed_dir, task_filename)
+            shutil.move(processing_filepath, consumed_filepath)
+
         except (json.JSONDecodeError, ValueError) as e:
             error_message = f"Failed to process task {task_filename} due to bad input: {e}"
             logging.warning(error_message)
@@ -239,7 +244,8 @@ def process_inbound_queue(app):
             result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
             write_result_to_outbound(job_id, result)
             os.makedirs(failed_dir, exist_ok=True)
-            shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
+            if os.path.exists(processing_filepath):
+                shutil.move(processing_filepath, os.path.join(failed_dir, task_filename))
 
         except Exception as e:
             error_message = f"An unexpected error occurred while processing task {task_filename}: {e}"
@@ -250,20 +256,28 @@ def process_inbound_queue(app):
             result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
             write_result_to_outbound(job_id, result)
             os.makedirs(failed_dir, exist_ok=True)
-            shutil.move(consumed_filepath, os.path.join(failed_dir, task_filename))
+            if os.path.exists(processing_filepath):
+                shutil.move(processing_filepath, os.path.join(failed_dir, task_filename))
 
 def check_idle_shutdown(app):
     """
-    Checks if the server has been idle AND the inbound queue is empty.
+    Checks if the server has been idle AND the inbound and processing queues are empty.
     If both conditions are met, it initiates a graceful VM shutdown.
     """
     with app.app_context():
         base_path = current_app.config['BASE_QUEUE_PATH']
         inbound_queue_dir = os.path.join(base_path, 'inbound')
+        processing_dir = os.path.join(base_path, 'processing')
         timestamp_file = os.path.join(base_path, 'last_api_call.timestamp')
 
-        if os.path.exists(inbound_queue_dir) and os.listdir(inbound_queue_dir):
-            logging.info("Idle check: Inbound queue is not empty. Deferring shutdown.")
+        inbound_is_empty = not (os.path.exists(inbound_queue_dir) and os.listdir(inbound_queue_dir))
+        processing_is_empty = not (os.path.exists(processing_dir) and os.listdir(processing_dir))
+
+        if not inbound_is_empty or not processing_is_empty:
+            if not inbound_is_empty:
+                logging.info("Idle check: Inbound queue is not empty. Deferring shutdown.")
+            if not processing_is_empty:
+                logging.info("Idle check: Processing queue is not empty. Deferring shutdown.")
             return
 
         try:
@@ -271,11 +285,11 @@ def check_idle_shutdown(app):
                 last_api_call_time = float(f.read().strip())
             
             idle_time = time.time() - last_api_call_time
-            logging.info(f"Idle check: Queue is empty. Last inbound call was {idle_time:.2f} seconds ago.")
+            logging.info(f"Idle check: Queues are empty. Last inbound call was {idle_time:.2f} seconds ago.")
 
             if idle_time > MAX_IDLE_TIME_IN_SECONDS:
                 logging.warning(
-                    f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queue is empty. "
+                    f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queues are empty. "
                     "Initiating VM power off."
                 )
                 os.system('sudo /sbin/shutdown --poweroff now')
@@ -299,6 +313,7 @@ def purge_old_files(app):
             os.path.join(base_path, 'outbound'),
             os.path.join(base_path, 'consumed'),
             os.path.join(base_path, 'failed'),
+            os.path.join(base_path, 'processing'),
             download_dir
         ]
 
