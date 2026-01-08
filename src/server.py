@@ -119,7 +119,7 @@ def receive_task():
         'job_id': job_id,
         'action': data['action'],
         'params': data.get('params', {}),
-        'status': 'pending',
+        'status': 'Pending',
         'received_at': time.time()
     }
 
@@ -158,7 +158,7 @@ def check_task_status():
             logging.error(f"Error reading or moving result file: {e}")
             return jsonify({'status': 'error', 'message': 'Could not retrieve result'}), 500
     else:
-        return jsonify({'status': 'pending', 'message': 'Job not yet complete.'})
+        return jsonify({'status': 'Pending', 'message': 'Job not yet complete.'})
 
 def page_not_found(e):
     """Renders the custom 404 HTML page."""

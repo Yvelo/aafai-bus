@@ -50,10 +50,10 @@ def test_check_task_status_pending(client):
     # 2. Action: Poll the endpoint for this job ID
     response = client.get(f'/outbound?job_id={non_existent_job_id}')
 
-    # 3. Assertions: Verify the status is 'pending'
+    # 3. Assertions: Verify the status is 'Pending'
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['status'] == 'pending'
+    assert data['status'] == 'Pending'
     assert 'message' in data
 
 

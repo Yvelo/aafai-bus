@@ -313,11 +313,11 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         # Handle cookie banner if it appears
         try:
-            wait = WebDriverWait(driver, 5)
+            wait = WebDriverWait(driver, 15)
             cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-test-id="cookie-banner__dismiss-btn"]')))
             logging.info("Cookie banner found. Clicking 'ACCEPT & CONTINUE'.")
             cookie_button.click()
-            time.sleep(10)  # Give a moment for the banner to disappear
+            time.sleep(15)  # Give a moment for the banner to disappear
         except TimeoutException:
             logging.info("Cookie banner not found or not clickable within the timeout period.")
 
@@ -380,10 +380,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     logging.info("Next page button is disabled. Ending pagination.")
                     break
                 driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
-                time.sleep(0.5)
+                time.sleep(1)
                 next_button.click()
                 page += 1
-                time.sleep(3.5)
+                time.sleep(5)
             except (NoSuchElementException, ElementClickInterceptedException):
                 logging.info("No next page button found or it was not clickable. Ending pagination.")
                 break

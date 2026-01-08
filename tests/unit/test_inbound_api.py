@@ -24,4 +24,4 @@ def test_check_task_status_pending(client):
     response = client.get('/outbound?job_id=non_existent_id')
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['status'] == 'pending'
+    assert data['status'] == 'Pending'

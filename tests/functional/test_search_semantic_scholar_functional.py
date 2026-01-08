@@ -30,10 +30,10 @@ class TestSearchSemanticScholarFunctional:
         job_id = "functional-test-author-search"
         params = {
             "query": {
-                "author": "Yann LeCun"
+                "author": "Antonin Morillon"
             },
-            "max_number_of_articles": 15,
-            "fetch_author_details": "relevant",  # Keep test fast
+            "max_number_of_articles": 500,
+            "fetch_author_details": "relevant"
         }
         mock_write_result = MagicMock()
 
@@ -48,10 +48,10 @@ class TestSearchSemanticScholarFunctional:
 
         articles = result['result']['articles']
         assert len(articles) > 0
-        assert len(articles) <= 15
+        assert len(articles) <= 500
 
-        found_author = any("LeCun" in author['name'] for article in articles for author in article['authors'])
-        assert found_author, "Expected to find 'LeCun' in the author list of the results"
+        found_author = any("Morillon" in author['name'] for article in articles for author in article['authors'])
+        assert found_author, "Expected to find 'Morillon' in the author list of the results"
 
     def test_search_by_keyword(self, temp_dir):
         """
