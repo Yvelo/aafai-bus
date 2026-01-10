@@ -86,6 +86,9 @@ def create_app(testing=False):
 
     @app.route('/outbound', methods=['GET'])
     def outbound_route():
+        timestamp_file = os.path.join(current_app.config['BASE_QUEUE_PATH'], 'last_api_call.timestamp')
+        with open(timestamp_file, 'w') as f:
+            f.write(str(time.time()))
         return check_task_status()
 
     @app.errorhandler(404)
