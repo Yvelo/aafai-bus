@@ -34,6 +34,9 @@ def test_clear_all_messages(app):
         clear_all_messages.execute(job_id, params, None, mock_write_result)
 
     # 3. ASSERT
+    assert os.path.exists(inbound_dir)
+    assert os.path.exists(consumed_dir)
+    assert os.path.exists(failed_dir)
     assert not os.listdir(inbound_dir)
     assert not os.listdir(consumed_dir)
     assert not os.listdir(failed_dir)

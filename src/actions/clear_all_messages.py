@@ -16,15 +16,25 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     for queue in queues_to_clear:
         queue_path = os.path.join(base_path, queue)
-        if os.path.exists(queue_path):
-            # Recreate the directory to clear all contents
+        if not os.path.isdir(queue_path):
+            # If directory doesn't exist, it's clear.
+            reported_cleared_queues.append(queue)
+            continue
+
+        all_deleted = True
+        for filename in os.listdir(queue_path):
+            file_path = os.path.join(queue_path, filename)
             try:
-                shutil.rmtree(queue_path)
-                os.makedirs(queue_path)
-                if queue in ['inbound', 'consumed', 'failed']:
-                    reported_cleared_queues.append(queue)
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
             except Exception as e:
-                logging.error(f'Failed to clear directory {queue_path}. Reason: {e}')
+                logging.error(f'Failed to delete {file_path}. Reason: {e}')
+                all_deleted = False
+        
+        if all_deleted:
+            reported_cleared_queues.append(queue)
 
     result = {
         'job_id': job_id,

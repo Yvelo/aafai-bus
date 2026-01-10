@@ -115,17 +115,25 @@ def test_clear_all_messages_action(client, app):
     assert data['result']['message'] == 'All queues cleared successfully.'
     assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}
 
-    # All queues should be empty.
+    # inbound and failed queues should be empty.
     assert not os.listdir(inbound_dir)
-    assert not os.listdir(consumed_dir)
     assert not os.listdir(failed_dir)
+
+    # The consumed queue should only contain the message and result for the
+    # 'clear_all_messages' action itself.
+    consumed_files = os.listdir(consumed_dir)
+    assert len(consumed_files) == 2
+    assert any(f.endswith(f'_{job_id}.json') for f in consumed_files)
+    assert f'result_{job_id}.json' in consumed_files
 
 def test_clear_all_messages_action_when_empty(client, app):
     """Test that the clear_all_messages action works correctly when queues are already empty."""
     # 1. ARRANGE
     base_path = current_app.config['BASE_QUEUE_PATH']
     inbound_dir = os.path.join(base_path, 'inbound')
-    
+    consumed_dir = os.path.join(base_path, 'consumed')
+    failed_dir = os.path.join(base_path, 'failed')
+
     # 2. ACT
     response = client.post('/inbound', json={'action': 'clear_all_messages'})
     assert response.status_code == 200
@@ -142,3 +150,14 @@ def test_clear_all_messages_action_when_empty(client, app):
     assert data['result']['message'] == 'All queues cleared successfully.'
     # Even if empty, the action reports it "cleared" them.
     assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}
+
+    # inbound and failed queues should be empty.
+    assert not os.listdir(inbound_dir)
+    assert not os.listdir(failed_dir)
+
+    # The consumed queue should only contain the message and result for the
+    # 'clear_all_messages' action itself.
+    consumed_files = os.listdir(consumed_dir)
+    assert len(consumed_files) == 2
+    assert any(f.endswith(f'_{job_id}.json') for f in consumed_files)
+    assert f'result_{job_id}.json' in consumed_files
