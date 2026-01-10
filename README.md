@@ -85,6 +85,7 @@ These tests verify that different parts of the system work together correctly. A
 - **Espacenet Patent Search (`search_espacenet`):** A new action that performs advanced searches on the Espacenet patent database. It scrapes patent details including title, link, publication date, applicant, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped.
 - **DocSend Downloader (`docsend_download`):** An action to download documents from DocSend links, handling passcodes if required.
 - **Droom Scraper (`scrape_droom`):** An action to scrape detailed information from Droom.org profile pages.
+- **Message Management (`clear_all_messages`, `get_all_messages`):** Provides actions to clear all message queues or retrieve all messages for administrative purposes.
 
 ## 6. Setup & Deployment
 
@@ -277,6 +278,30 @@ Scrapes detailed information from a Droom.org profile page.
   "params": {
     "url": "string"
   }
+}
+```
+
+### `clear_all_messages`
+
+Clears all messages from the inbound, consumed, and failed queues. This is useful for resetting the system state.
+
+**Input JSON Format:**
+```json
+{
+  "action": "clear_all_messages",
+  "params": {}
+}
+```
+
+### `get_all_messages`
+
+Retrieves a list of all messages currently in the inbound, consumed, and failed queues.
+
+**Input JSON Format:**
+```json
+{
+  "action": "get_all_messages",
+  "params": {}
 }
 ```
 
