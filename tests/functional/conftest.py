@@ -11,26 +11,32 @@ from src.server import create_app
 def app():
     """Create and configure a new app instance for each test using the app factory."""
 
-    # Create the app with testing configuration
+    # Create the app with testing configuration. This also creates the queue directories.
     app = create_app(testing=True)
-
-    # The base path is now set within create_app, but we still need to clean it up
     base_path = app.config['BASE_QUEUE_PATH']
 
+    # The actions run in a separate process and don't have access to the app config,
+    # so we pass the test queue path via an environment variable.
+    os.environ['QUEUE_BASE_PATH'] = base_path
+
     # --- Setup: Ensure a clean state before each test ---
-    # Clean up directories from previous runs if they exist
+    # The create_app function already creates the directories. Here, we just ensure
+    # they are empty before the test runs.
     if os.path.exists(base_path):
         shutil.rmtree(base_path)
-
-    # Re-create directories for the test
+    
+    # Re-create all necessary directories for the test environment.
     os.makedirs(os.path.join(base_path, 'inbound'), exist_ok=True)
     os.makedirs(os.path.join(base_path, 'outbound'), exist_ok=True)
     os.makedirs(os.path.join(base_path, 'consumed'), exist_ok=True)
+    os.makedirs(os.path.join(base_path, 'failed'), exist_ok=True)
+    os.makedirs(os.path.join(base_path, 'processing'), exist_ok=True)
 
     yield app
 
     # --- Teardown: Clean up after each test ---
     shutil.rmtree(base_path)
+    del os.environ['QUEUE_BASE_PATH']
 
 @pytest.fixture
 def client(app):

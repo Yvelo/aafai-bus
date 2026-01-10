@@ -53,7 +53,7 @@ def test_check_task_status_pending(client):
     # 3. Assertions: Verify the status is 'Pending'
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['status'] == 'Pending'
+    assert data['status'] == 'pending'
     assert 'message' in data
 
 

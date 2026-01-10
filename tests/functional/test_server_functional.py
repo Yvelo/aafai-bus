@@ -1,77 +1,144 @@
 import os
 import json
 import time
+import logging
 from flask import current_app
+from src.server import process_inbound_queue
 
-def test_get_all_messages_empty(client):
-    """Test that getting all messages returns an empty structure when no messages exist."""
-    response = client.get('/messages')
+def poll_for_result(client, job_id, timeout=30):
+    """Polls the outbound endpoint until the job is complete or times out."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        response = client.get(f'/outbound?job_id={job_id}')
+        if response.status_code == 200:
+            data = response.get_json()
+            logging.info(f"Polling for job {job_id}, status: {data.get('status')}")
+            if data.get('status') == 'complete':
+                return data
+        time.sleep(0.5)
+    return None
+
+def test_get_all_messages_action_empty(client, app):
+    """Test that the get_all_messages action returns an empty structure when no messages exist."""
+    # 1. ACT
+    response = client.post('/inbound', json={'action': 'get_all_messages'})
     assert response.status_code == 200
-    data = response.get_json()
-    assert data == {
-        'inbound': [],
-        'outbound': [],
-        'consumed': [],
-        'failed': [],
-        'processing': []
-    }
+    job_id = response.get_json()['job_id']
+    time.sleep(0.1) # Give the filesystem time to create the file
 
-def test_get_all_messages_with_data(client):
-    """Test retrieving messages from all stages."""
+    process_inbound_queue(app)  # Manually trigger processing
+
+    data = poll_for_result(client, job_id)
+
+    # 3. ASSERT
+    assert data is not None, "Polling for result timed out."
+    assert data['status'] == 'complete'
+    messages = data['result']
+    assert messages['inbound'] == []
+    assert messages['consumed'] == []
+    assert messages['failed'] == []
+
+def test_get_all_messages_action_with_data(client, app):
+    """Test the get_all_messages action with messages in various queues."""
+    # 1. ARRANGE
     base_path = current_app.config['BASE_QUEUE_PATH']
-    stages = ['inbound', 'outbound', 'consumed', 'failed', 'processing']
-    
-    # Create dummy message files in each stage
-    for stage in stages:
-        stage_path = os.path.join(base_path, stage)
-        os.makedirs(stage_path, exist_ok=True)
-        with open(os.path.join(stage_path, f'message_{stage}.json'), 'w') as f:
-            json.dump({'id': f'{stage}_msg'}, f)
+    inbound_dir = os.path.join(base_path, 'inbound')
+    consumed_dir = os.path.join(base_path, 'consumed')
+    failed_dir = os.path.join(base_path, 'failed')
 
-    response = client.get('/messages')
+    inbound_msg = {"test": "inbound_data"}
+    consumed_msg = {"test": "consumed_data"}
+    failed_msg = {"test": "failed_data"}
+
+    with open(os.path.join(inbound_dir, 'inbound.json'), 'w') as f:
+        json.dump(inbound_msg, f)
+    with open(os.path.join(consumed_dir, 'consumed.json'), 'w') as f:
+        json.dump(consumed_msg, f)
+    with open(os.path.join(failed_dir, 'failed.json'), 'w') as f:
+        json.dump(failed_msg, f)
+
+    # 2. ACT
+    response = client.post('/inbound', json={'action': 'get_all_messages'})
     assert response.status_code == 200
-    data = response.get_json()
+    job_id = response.get_json()['job_id']
+    time.sleep(0.1) # Give the filesystem time to create the file
 
-    for stage in stages:
-        assert len(data[stage]) == 1
-        assert data[stage][0]['id'] == f'{stage}_msg'
-        assert data[stage][0]['filename'] == f'message_{stage}.json'
+    process_inbound_queue(app)
 
-def test_clear_all_messages(client):
-    """Test clearing all messages from all stages."""
+    data = poll_for_result(client, job_id)
+
+    # 3. ASSERT
+    assert data is not None, "Polling for result timed out."
+    assert data['status'] == 'complete'
+    messages = data['result']
+    
+    # The inbound message created for the test should be present.
+    # The message for the get_all_messages action itself is skipped.
+    assert len(messages['inbound']) == 1
+    assert messages['inbound'][0]['test'] == 'inbound_data'
+    
+    assert len(messages['consumed']) == 1
+    assert messages['consumed'][0]['test'] == 'consumed_data'
+    
+    assert len(messages['failed']) == 1
+    assert messages['failed'][0]['test'] == 'failed_data'
+
+def test_clear_all_messages_action(client, app):
+    """Test the clear_all_messages action."""
+    # 1. ARRANGE
     base_path = current_app.config['BASE_QUEUE_PATH']
-    stages = ['inbound', 'outbound', 'consumed', 'failed', 'processing']
+    inbound_dir = os.path.join(base_path, 'inbound')
+    consumed_dir = os.path.join(base_path, 'consumed')
+    failed_dir = os.path.join(base_path, 'failed')
+
+    # Create dummy files in each directory to ensure they are cleared.
+    with open(os.path.join(inbound_dir, 'dummy_inbound.json'), 'w') as f:
+        json.dump({'action': 'dummy_action'}, f)
+    with open(os.path.join(consumed_dir, 'dummy_consumed.json'), 'w') as f:
+        json.dump({'test': 'dummy'}, f)
+    with open(os.path.join(failed_dir, 'dummy_failed.json'), 'w') as f:
+        json.dump({'test': 'dummy'}, f)
+
+    # 2. ACT
+    response = client.post('/inbound', json={'action': 'clear_all_messages'})
+    assert response.status_code == 200
+    job_id = response.get_json()['job_id']
+    time.sleep(0.1)  # Give the filesystem time to create the file
+
+    process_inbound_queue(app)
+
+    data = poll_for_result(client, job_id)
+
+    # 3. ASSERT
+    assert data is not None, "Polling for result timed out."
+    assert data['status'] == 'complete'
+    assert data['result']['message'] == 'All queues cleared successfully.'
+    assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}
+
+    # All queues should be empty.
+    assert not os.listdir(inbound_dir)
+    assert not os.listdir(consumed_dir)
+    assert not os.listdir(failed_dir)
+
+def test_clear_all_messages_action_when_empty(client, app):
+    """Test that the clear_all_messages action works correctly when queues are already empty."""
+    # 1. ARRANGE
+    base_path = current_app.config['BASE_QUEUE_PATH']
+    inbound_dir = os.path.join(base_path, 'inbound')
     
-    # Create dummy message files in each stage
-    for stage in stages:
-        stage_path = os.path.join(base_path, stage)
-        os.makedirs(stage_path, exist_ok=True)
-        with open(os.path.join(stage_path, f'message_{stage}.json'), 'w') as f:
-            json.dump({'id': f'{stage}_msg'}, f)
-
-    # Verify files exist before clearing
-    for stage in stages:
-        assert len(os.listdir(os.path.join(base_path, stage))) == 1
-
-    response = client.post('/messages/clear')
+    # 2. ACT
+    response = client.post('/inbound', json={'action': 'clear_all_messages'})
     assert response.status_code == 200
-    data = response.get_json()
+    job_id = response.get_json()['job_id']
+    time.sleep(0.1) # Give the filesystem time to create the file
 
-    assert data['status'] == 'success'
-    for stage in stages:
-        assert data['cleared_messages'][stage] == 1
-        assert len(os.listdir(os.path.join(base_path, stage))) == 0
+    process_inbound_queue(app)
 
-def test_clear_all_messages_empty(client):
-    """Test that clearing messages when none exist works correctly."""
-    response = client.post('/messages/clear')
-    assert response.status_code == 200
-    data = response.get_json()
-    assert data['status'] == 'success'
-    assert data['cleared_messages'] == {
-        'inbound': 0,
-        'outbound': 0,
-        'consumed': 0,
-        'failed': 0,
-        'processing': 0
-    }
+    data = poll_for_result(client, job_id)
+
+    # 3. ASSERT
+    assert data is not None, "Polling for result timed out."
+    assert data['status'] == 'complete'
+    assert data['result']['message'] == 'All queues cleared successfully.'
+    # Even if empty, the action reports it "cleared" them.
+    assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}
