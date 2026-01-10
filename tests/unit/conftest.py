@@ -26,6 +26,8 @@ def app():
     os.makedirs(os.path.join(base_path, 'inbound'), exist_ok=True)
     os.makedirs(os.path.join(base_path, 'outbound'), exist_ok=True)
     os.makedirs(os.path.join(base_path, 'consumed'), exist_ok=True)
+    os.makedirs(os.path.join(base_path, 'processing'), exist_ok=True)
+    os.makedirs(os.path.join(base_path, 'failed'), exist_ok=True)
 
     yield app
 

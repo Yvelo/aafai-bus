@@ -100,6 +100,58 @@ def create_app(testing=False):
     def outbound_route():
         return check_task_status()
 
+    @app.route('/messages', methods=['GET'])
+    def get_all_messages():
+        """Gets a list of all messages in each stage of processing."""
+        base_path = current_app.config['BASE_QUEUE_PATH']
+        stages = ['inbound', 'outbound', 'consumed', 'failed', 'processing']
+        all_messages = {}
+
+        for stage in stages:
+            stage_path = os.path.join(base_path, stage)
+            messages = []
+            if os.path.exists(stage_path):
+                for filename in sorted(os.listdir(stage_path)):
+                    filepath = os.path.join(stage_path, filename)
+                    message_content = {'filename': filename}
+                    try:
+                        with open(filepath, 'r') as f:
+                            message_content.update(json.load(f))
+                        messages.append(message_content)
+                    except (IOError, json.JSONDecodeError) as e:
+                        logging.warning(f"Could not read or parse message {filepath}: {e}")
+                        message_content['error'] = 'Could not read or parse file'
+                        messages.append(message_content)
+            all_messages[stage] = messages
+        
+        return jsonify(all_messages)
+
+    @app.route('/messages/clear', methods=['POST'])
+    def clear_all_messages():
+        """Clears all messages in every processing stage."""
+        base_path = current_app.config['BASE_QUEUE_PATH']
+        stages = ['inbound', 'outbound', 'consumed', 'failed', 'processing']
+        cleared_count = {}
+
+        for stage in stages:
+            stage_path = os.path.join(base_path, stage)
+            count = 0
+            if os.path.exists(stage_path):
+                for item_name in os.listdir(stage_path):
+                    item_path = os.path.join(stage_path, item_name)
+                    try:
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.unlink(item_path)
+                            count += 1
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            count += 1
+                    except Exception as e:
+                        logging.error(f'Failed to delete {item_path}. Reason: {e}')
+            cleared_count[stage] = count
+
+        return jsonify({'status': 'success', 'cleared_messages': cleared_count})
+
     @app.errorhandler(404)
     def not_found_error(e):
         return page_not_found(e)
