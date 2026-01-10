@@ -151,7 +151,7 @@ def check_task_status():
         for f in os.listdir(failed_dir):
             if job_id in f:
                 return jsonify({'status': 'failed', 'message': 'Job failed during processing.'})
-        return jsonify({'status': 'pending', 'message': 'Job not yet complete.'})
+        return jsonify({'status': 'Pending', 'message': 'Job not yet complete.'})
 
 
 def page_not_found(e):
