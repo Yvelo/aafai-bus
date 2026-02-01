@@ -4,6 +4,7 @@ import random
 import shutil
 import sys
 from unittest.mock import MagicMock
+from src.browser_config import get_headless_status
 
 # BEGIN: Monkey patch for distutils
 # This is required for undetected-chromedriver to work with Python 3.12+
@@ -60,7 +61,7 @@ def _setup_driver(job_download_dir):
     import undetected_chromedriver as uc
 
     options = uc.ChromeOptions()
-    is_headless = os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true'
+    is_headless = get_headless_status()
 
     # Add arguments to make the browser appear more human
     options.add_argument('--disable-blink-features=AutomationControlled')

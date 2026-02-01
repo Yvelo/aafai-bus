@@ -30,6 +30,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.driver_cache import DriverCacheManager
+from src.browser_config import get_chrome_options
 
 # --- Main Action Function ---
 
@@ -58,7 +59,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     driver = None
     try:
-        driver = _setup_driver(job_download_dir, headless=headless)
+        driver = _setup_driver(job_download_dir)
         _login(driver, url, username, password)
         
         WebDriverWait(driver, 60).until(
@@ -93,11 +94,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
 # --- Helper Functions ---
 
-def _setup_driver(download_dir, headless=True):
     """Sets up the Selenium WebDriver."""
-    options = Options()
-    if headless:
-        options.add_argument("--headless")
+    options = get_chrome_options()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")

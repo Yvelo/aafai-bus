@@ -17,6 +17,7 @@ from time import sleep
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from src.browser_config import get_chrome_options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.driver_cache import DriverCacheManager
@@ -103,9 +104,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
 def _setup_driver(download_dir):
     """Sets up the Selenium WebDriver."""
-    options = Options()
-    if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
-        options.add_argument('--headless')
+    options = get_chrome_options()
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
