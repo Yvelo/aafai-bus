@@ -59,7 +59,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     driver = None
     try:
-        driver = _setup_driver(job_download_dir)
+        driver, service = _setup_driver(job_download_dir)
         _login(driver, url, username, password)
         
         WebDriverWait(driver, 60).until(
@@ -94,6 +94,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
 # --- Helper Functions ---
 
+def _setup_driver(download_dir):
     """Sets up the Selenium WebDriver."""
     options = get_chrome_options()
     options.add_argument("--no-sandbox")

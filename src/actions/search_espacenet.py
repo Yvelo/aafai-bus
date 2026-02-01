@@ -90,7 +90,7 @@ def _setup_driver(job_download_dir):
     driver = uc.Chrome(
         options=options,
         headless=is_headless,
-        version_main=142
+        version_main=144
     )
 
     # Apply stealth settings to make the browser look more human
