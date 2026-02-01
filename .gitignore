@@ -7,3 +7,10 @@
 /downloads/test-job-success/index.html
 /downloads/
 /data/
+src/__pycache__/server.cpython-313.pyc
+tests/__pycache__/__init__.cpython-313.pyc
+tests/functional/__pycache__/__init__.cpython-313.pyc
+tests/functional/__pycache__/conftest.cpython-313-pytest-9.0.2.pyc
+tests/functional/__pycache__/test_docsend_scraping_functional.cpython-313-pytest-9.0.2.pyc
+src/actions/__pycache__/__init__.cpython-313.pyc
+src/actions/__pycache__/docsend_scraping.cpython-313.pyc
