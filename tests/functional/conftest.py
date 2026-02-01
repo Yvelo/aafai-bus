@@ -23,7 +23,7 @@ def app():
     # The create_app function already creates the directories. Here, we just ensure
     # they are empty before the test runs.
     if os.path.exists(base_path):
-        shutil.rmtree(base_path)
+        shutil.rmtree(base_path, ignore_errors=True)
     
     # Re-create all necessary directories for the test environment.
     os.makedirs(os.path.join(base_path, 'inbound'), exist_ok=True)
@@ -35,7 +35,7 @@ def app():
     yield app
 
     # --- Teardown: Clean up after each test ---
-    shutil.rmtree(base_path)
+    shutil.rmtree(base_path, ignore_errors=True)
     del os.environ['QUEUE_BASE_PATH']
 
 @pytest.fixture

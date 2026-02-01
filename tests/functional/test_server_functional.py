@@ -2,7 +2,7 @@ import os
 import json
 import time
 import logging
-from flask import current_app
+
 from src.server import process_inbound_queue
 
 def poll_for_result(client, job_id, timeout=30):
@@ -41,7 +41,7 @@ def test_get_all_messages_action_empty(client, app):
 def test_get_all_messages_action_with_data(client, app):
     """Test the get_all_messages action with messages in various queues."""
     # 1. ARRANGE
-    base_path = current_app.config['BASE_QUEUE_PATH']
+    base_path = app.config['BASE_QUEUE_PATH']
     inbound_dir = os.path.join(base_path, 'inbound')
     consumed_dir = os.path.join(base_path, 'consumed')
     failed_dir = os.path.join(base_path, 'failed')
@@ -86,7 +86,7 @@ def test_get_all_messages_action_with_data(client, app):
 def test_clear_all_messages_action(client, app):
     """Test the clear_all_messages action."""
     # 1. ARRANGE
-    base_path = current_app.config['BASE_QUEUE_PATH']
+    base_path = app.config['BASE_QUEUE_PATH']
     inbound_dir = os.path.join(base_path, 'inbound')
     consumed_dir = os.path.join(base_path, 'consumed')
     failed_dir = os.path.join(base_path, 'failed')
@@ -129,7 +129,7 @@ def test_clear_all_messages_action(client, app):
 def test_clear_all_messages_action_when_empty(client, app):
     """Test that the clear_all_messages action works correctly when queues are already empty."""
     # 1. ARRANGE
-    base_path = current_app.config['BASE_QUEUE_PATH']
+    base_path = app.config['BASE_QUEUE_PATH']
     inbound_dir = os.path.join(base_path, 'inbound')
     consumed_dir = os.path.join(base_path, 'consumed')
     failed_dir = os.path.join(base_path, 'failed')
