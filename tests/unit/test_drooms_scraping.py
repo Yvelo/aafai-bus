@@ -48,7 +48,7 @@ def test_execute_success(mock_process_all, mock_gather_all, mock_setup_driver, m
     """
     # ARRANGE
     mock_driver = MagicMock()
-    mock_setup_driver.return_value = mock_driver
+    mock_setup_driver.return_value = (mock_driver, MagicMock())
     write_mock = MagicMock()
     job_id = 'test-job-2'
     download_dir = '/tmp/test-job'
@@ -87,7 +87,7 @@ def test_execute_login_failure(mock_setup_driver, mock_login, mock_makedirs):
     """
     # ARRANGE
     mock_driver = MagicMock()
-    mock_setup_driver.return_value = mock_driver
+    mock_setup_driver.return_value = (mock_driver, MagicMock())
     write_mock = MagicMock()
     job_id = 'test-job-3'
     download_dir = '/tmp/test-job'

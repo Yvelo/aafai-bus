@@ -27,12 +27,12 @@ class TestDownloadWebsite(unittest.TestCase):
     @patch('actions.drooms_scraping._process_all_items')
     def test_execute_success(self, mock_process_all_items, mock_gather_all_items, mock_expand_all_folders, mock_login, mock_setup_driver):
         mock_driver = MagicMock()
-        mock_setup_driver.return_value = mock_driver
+        mock_setup_driver.return_value = (mock_driver, MagicMock())
         mock_gather_all_items.return_value = [{"id": "doc1", "order": "1", "text": "Doc 1", "is_folder": False}]
 
         execute(self.job_id, self.params, self.test_dir, self.write_result_to_outbound)
 
-        mock_setup_driver.assert_called_once_with(ANY, headless=True)
+        mock_setup_driver.assert_called_once_with(ANY)
         mock_login.assert_called_once_with(mock_driver, self.params["url"], self.params["username"], self.params["password"])
         mock_expand_all_folders.assert_called_once()
         mock_gather_all_items.assert_called_once()
