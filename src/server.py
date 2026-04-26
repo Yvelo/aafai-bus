@@ -18,7 +18,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SRC_ROOT, '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 # --- Constants ---
-MAX_IDLE_TIME_IN_SECONDS = 60
+MAX_IDLE_TIME_IN_SECONDS = 1800
 QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
