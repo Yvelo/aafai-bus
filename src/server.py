@@ -18,7 +18,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SRC_ROOT, '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 # --- Constants ---
-MAX_IDLE_TIME_IN_SECONDS = 1800
+MAX_IDLE_TIME_IN_SECONDS = 60
 QUEUE_PEREMPTION_DAYS = 7
 
 def create_app(testing=False):
@@ -282,7 +282,7 @@ def check_idle_shutdown(app):
                 )
                 # In a real scenario, you'd use a more robust method.
                 # For this example, we'll just log it.
-                # os.system('sudo /sbin/shutdown --poweroff now')
+                os.system('sudo /sbin/shutdown --poweroff now')
 
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
