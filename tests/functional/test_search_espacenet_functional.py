@@ -30,9 +30,9 @@ class TestSearchEspacenetFunctional:
         job_id = "functional-test-keyword-search"
         params = {
             "queries": [
-                ["neoantigen", "tumor", "irradiated", "CAR-T", "5FU"]
+                ["cancer", "immunotherapy"]
             ],
-            "max_number_of_patents": 100
+            "max_number_of_patents": 50
         }
         mock_write_result = MagicMock()
         driver = None

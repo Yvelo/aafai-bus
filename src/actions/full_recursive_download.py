@@ -4,6 +4,7 @@ import shutil
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from src.browser_config import get_chrome_options
 from selenium.webdriver.chrome.service import Service
 import tempfile
 from urllib.parse import urlparse, urljoin, urlunparse
@@ -11,6 +12,7 @@ from collections import deque
 import time # Import the time module
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium_stealth import stealth
+from src.browser_config import get_chrome_options
 from webdriver_manager.core.driver_cache import DriverCacheManager
 
 
@@ -20,9 +22,7 @@ DEFAULT_MAX_DEPTH = 1 # Default maximum recursion depth
 
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
-    chrome_options = Options()
-    if os.environ.get('HEADLESS_BROWSER', 'true').lower() == 'true':
-        chrome_options.add_argument("--headless")
+    chrome_options = get_chrome_options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
