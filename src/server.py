@@ -95,6 +95,11 @@ def create_app(testing=False):
     def queues_route():
         return get_messages_status()
 
+    @app.route('/purge', methods=['POST'])
+    def purge_route():
+        purge_old_files(current_app._get_current_object())
+        return jsonify({'status': 'ok', 'message': 'Purge job started.'})
+
     @app.errorhandler(404)
     def not_found_error(e):
         return page_not_found(e)
