@@ -71,7 +71,7 @@ def create_app(testing=False):
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
         scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5, id='process_queue')
         scheduler.add_job(func=check_idle_shutdown, args=[app], trigger='interval', seconds=30, id='idle_check')
-        scheduler.add_job(func=purge_old_files, args=[app], trigger='cron', hour=3, id='purge_old_files_daily')
+        scheduler.add_job(func=lambda: purge_old_files(app), trigger='cron', hour=3, id='purge_old_files_daily')
         atexit.register(lambda: scheduler.shutdown())
         scheduler.start()
         logging.info("Scheduler started with recurring jobs enabled.")
@@ -97,8 +97,14 @@ def create_app(testing=False):
 
     @app.route('/purge', methods=['POST'])
     def purge_route():
-        purge_old_files(current_app._get_current_object())
-        return jsonify({'status': 'ok', 'message': 'Purge job started.'})
+        data = request.get_json(silent=True) or {}
+        try:
+            days = int(data.get('days', QUEUE_PEREMPTION_DAYS))
+        except (ValueError, TypeError):
+            return jsonify({'status': 'error', 'message': "'days' must be a valid integer."}), 400
+        
+        purge_old_files(current_app._get_current_object(), retention_days=days)
+        return jsonify({'status': 'ok', 'message': f'Purge job for files older than {days} days started.'})
 
     @app.errorhandler(404)
     def not_found_error(e):
@@ -315,16 +321,18 @@ def check_idle_shutdown(app):
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
 
-def purge_old_files(app):
+def purge_old_files(app, retention_days=None):
     """
-    Deletes files and directories older than QUEUE_PEREMPTION_DAYS.
+    Deletes files and directories older than the specified number of days.
+    If retention_days is not provided, it defaults to QUEUE_PEREMPTION_DAYS.
     """
     with app.app_context():
-        logging.info("Purge job started.")
+        days = retention_days if retention_days is not None else QUEUE_PEREMPTION_DAYS
+        logging.info(f"Purge job started. Deleting items older than {days} days.")
         base_path = current_app.config['BASE_QUEUE_PATH']
         download_dir = current_app.config['DOWNLOAD_DIR']
         
-        cutoff = time.time() - (QUEUE_PEREMPTION_DAYS * 24 * 60 * 60)
+        cutoff = time.time() - (days * 24 * 60 * 60)
         
         dirs_to_purge = [
             os.path.join(base_path, 'inbound'),
