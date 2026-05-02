@@ -161,3 +161,69 @@ def test_clear_all_messages_action_when_empty(client, app):
     assert len(consumed_files) == 2
     assert any(f.endswith(f'_{job_id}.json') for f in consumed_files)
     assert f'result_{job_id}.json' in consumed_files
+
+def test_get_messages_status_empty(client):
+    """Test that the /queues endpoint returns an empty structure when no messages exist."""
+    # 1. ARRANGE - Queues are empty by default in tests
+
+    # 2. ACT
+    response = client.get('/queues')
+    assert response.status_code == 200
+    data = response.get_json()
+
+    # 3. ASSERT
+    assert data is not None
+    assert data['inbound'] == []
+    assert data['outbound'] == []
+    assert data['consumed'] == []
+    assert data['failed'] == []
+    assert data['processing'] == []
+
+def test_get_messages_status_with_data(client, app):
+    """Test the /queues endpoint with messages in various queues."""
+    # 1. ARRANGE
+    base_path = app.config['BASE_QUEUE_PATH']
+    inbound_dir = os.path.join(base_path, 'inbound')
+    outbound_dir = os.path.join(base_path, 'outbound')
+    consumed_dir = os.path.join(base_path, 'consumed')
+    failed_dir = os.path.join(base_path, 'failed')
+    processing_dir = os.path.join(base_path, 'processing')
+
+    inbound_msg = {"test": "inbound_data"}
+    outbound_msg = {"test": "outbound_data"}
+    consumed_msg = {"test": "consumed_data"}
+    failed_msg = {"test": "failed_data"}
+    processing_msg = {"test": "processing_data"}
+
+    with open(os.path.join(inbound_dir, 'inbound.json'), 'w') as f:
+        json.dump(inbound_msg, f)
+    with open(os.path.join(outbound_dir, 'outbound.json'), 'w') as f:
+        json.dump(outbound_msg, f)
+    with open(os.path.join(consumed_dir, 'consumed.json'), 'w') as f:
+        json.dump(consumed_msg, f)
+    with open(os.path.join(failed_dir, 'failed.json'), 'w') as f:
+        json.dump(failed_msg, f)
+    with open(os.path.join(processing_dir, 'processing.json'), 'w') as f:
+        json.dump(processing_msg, f)
+
+    # 2. ACT
+    response = client.get('/queues')
+    assert response.status_code == 200
+    data = response.get_json()
+
+    # 3. ASSERT
+    assert data is not None
+    assert len(data['inbound']) == 1
+    assert data['inbound'][0]['test'] == 'inbound_data'
+    
+    assert len(data['outbound']) == 1
+    assert data['outbound'][0]['test'] == 'outbound_data'
+
+    assert len(data['consumed']) == 1
+    assert data['consumed'][0]['test'] == 'consumed_data'
+    
+    assert len(data['failed']) == 1
+    assert data['failed'][0]['test'] == 'failed_data'
+
+    assert len(data['processing']) == 1
+    assert data['processing'][0]['test'] == 'processing_data'

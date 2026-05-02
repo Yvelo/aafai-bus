@@ -91,11 +91,34 @@ def create_app(testing=False):
             f.write(str(time.time()))
         return check_task_status()
 
+    @app.route('/queues', methods=['GET'])
+    def queues_route():
+        return get_messages_status()
+
     @app.errorhandler(404)
     def not_found_error(e):
         return page_not_found(e)
 
     return app
+
+def get_messages_status():
+    """Returns the content of each message queue."""
+    base_path = current_app.config['BASE_QUEUE_PATH']
+    queues = ['inbound', 'outbound', 'consumed', 'failed', 'processing']
+    queues_content = {}
+
+    for queue_name in queues:
+        queue_dir = os.path.join(base_path, queue_name)
+        queues_content[queue_name] = []
+        if os.path.exists(queue_dir):
+            for filename in os.listdir(queue_dir):
+                filepath = os.path.join(queue_dir, filename)
+                try:
+                    with open(filepath, 'r') as f:
+                        queues_content[queue_name].append(json.load(f))
+                except (IOError, json.JSONDecodeError) as e:
+                    logging.error(f"Error reading file {filepath}: {e}")
+    return jsonify(queues_content)
 
 def receive_task():
     """Handles creating a new task from an inbound request."""
