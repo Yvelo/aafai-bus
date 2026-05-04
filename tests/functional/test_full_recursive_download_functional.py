@@ -84,3 +84,16 @@ class TestFullRecursiveDownloadFunctional:
             "max_depth": 0
         }
         self._run_test(job_id, params, temp_dir)
+
+    def test_download_with_more_content_button(self, temp_dir):
+        """
+        Tests downloading from a page that has a 'Load More' button to load more content.
+        """
+        job_id = "functional-test-download-with-more-content"
+        start_url = "https://www.parissaclaycancercluster.org/projets-accompagnes"
+        params = {
+            "url": start_url,
+            "max_depth": 0,
+            "more_content_button_text": "Voir plus de projets"
+        }
+        self._run_test(job_id, params, temp_dir)

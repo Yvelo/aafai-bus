@@ -2,23 +2,24 @@ import logging
 import os
 import shutil
 from selenium import webdriver
+from selenium.common import ElementClickInterceptedException, NoSuchElementException, TimeoutException, \
+    StaleElementReferenceException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from src.browser_config import get_chrome_options
 from selenium.webdriver.chrome.service import Service
 import tempfile
 from urllib.parse import urlparse, urljoin, urlunparse
 from collections import deque
-import time # Import the time module
+import time
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium_stealth import stealth
-from src.browser_config import get_chrome_options
 from webdriver_manager.core.driver_cache import DriverCacheManager
 
-
 MAXIMUM_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
-DEFAULT_MAX_DEPTH = 1 # Default maximum recursion depth
-
+DEFAULT_MAX_DEPTH = 1  # Default maximum recursion depth
 
 def _setup_driver(job_download_dir):
     """Configures and returns a headless Chrome WebDriver instance."""
@@ -31,18 +32,11 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-in-process-stack-traces")
     chrome_options.add_argument("--disable-logging")
     chrome_options.add_argument("--disable-dev-tools")
-    chrome_options.add_argument("--window-size=1920,1080") # Set a consistent window size
+    chrome_options.add_argument("--window-size=1920,1080")
 
-    # Create a single, persistent temporary directory for this driver instance.
-    # This directory will serve as the HOME directory for the Chrome process.
     temp_dir = tempfile.mkdtemp()
-
-    # **CRITICAL FIX**: Set the HOME environment variable for the Chrome process.
-    # This forces Chrome to write user-specific files (like .local) here,
-    # avoiding permission errors in /var/www.
     os.environ['HOME'] = temp_dir
 
-    # Define paths within our new temporary HOME directory
     user_data_dir = os.path.join(temp_dir, "user-data")
     disk_cache_dir = os.path.join(temp_dir, "cache")
     crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
@@ -51,19 +45,15 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
     chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
 
-    # Use a persistent cache for WebDriver Manager
     persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
     os.makedirs(persistent_cache_dir, exist_ok=True)
 
-    # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(),
+                      service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    # --- Apply selenium-stealth ---
-    # This function applies a series of patches to the driver to make it
-    # appear more like a regular user's browser, helping to bypass bot detection.
     stealth(driver,
             languages=["en-US", "en"],
             vendor="Google Inc.",
@@ -74,10 +64,7 @@ def _setup_driver(job_download_dir):
             )
 
     driver.set_page_load_timeout(60)
-
-    # Store the temporary directory path so it can be cleaned up later
     driver.temp_dir = temp_dir
-
     return driver, service
 
 def _normalize_domain(domain):
@@ -91,27 +78,19 @@ def _canonicalize_url(url):
     Canonicalizes a URL by removing fragments and normalizing trailing slashes in the path.
     """
     parsed_url = urlparse(url)
-    
-    # Remove fragment
     parsed_url_no_fragment = parsed_url._replace(fragment='')
-    
-    # Normalize path: remove trailing slash unless it's the root path
     clean_path = parsed_url_no_fragment.path
     if clean_path.endswith('/') and len(clean_path) > 1:
         clean_path = clean_path.rstrip('/')
-    elif not clean_path: # Empty path should be '/'
+    elif not clean_path:
         clean_path = '/'
-    
     return urlunparse(parsed_url_no_fragment._replace(path=clean_path))
-
 
 def _get_links_from_page(driver, current_page_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls):
     """
-    Extracts all valid, same-domain links from the current page,
-    filters out already visited or queued URLs, and returns them with an incremented depth.
+    Extracts all valid, same-domain links from the current page.
     """
     links_to_add = []
-
     if current_depth >= max_depth:
         return []
 
@@ -122,20 +101,14 @@ def _get_links_from_page(driver, current_page_url, initial_domain, current_depth
         for a_tag in a_tags:
             href = a_tag.get_attribute('href')
             if href:
-                # Resolve relative URLs to absolute URLs using the current page's URL
                 absolute_url = urljoin(current_page_url, href)
-                
-                # Canonicalize the absolute URL
                 clean_url = _canonicalize_url(absolute_url)
                 parsed_clean_url = urlparse(clean_url)
 
-                # Only consider http/https links
                 if parsed_clean_url.scheme not in ['http', 'https']:
                     continue
 
-                # Ensure it's the same domain as the initial URL (after normalization)
                 if _normalize_domain(parsed_clean_url.netloc) == normalized_initial_domain:
-                    # Only add if not already successfully crawled AND not already in the queue
                     if clean_url not in visited_urls and clean_url not in queued_urls:
                         links_to_add.append((clean_url, current_depth + 1))
     except Exception as e:
@@ -143,38 +116,74 @@ def _get_links_from_page(driver, current_page_url, initial_domain, current_depth
 
     return links_to_add
 
+def _click_more_button(driver, button_text):
+    """
+    Continuously clicks a 'more content' button until it's no longer present or clickable.
+    """
+    if not button_text:
+        return
+
+    logging.info(f"Trying to click the more content button with text: '{button_text}'")
+
+    while True:
+        try:
+            wait = WebDriverWait(driver, 10)
+            # More flexible XPath to find the button by its text, including nested elements
+            xpath = f"//button[.//span[contains(text(), '{button_text}')] or @aria-label='{button_text}']"
+            button_to_click = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+
+            if button_to_click:
+                logging.info(f"Clicking button with text: '{button_text}'")
+                driver.execute_script("arguments[0].scrollIntoView(true);", button_to_click)
+                time.sleep(0.5)
+                button_to_click.click()
+                time.sleep(2)
+            else:
+                logging.info(f"More content button with text '{button_text}' not found or no longer interactive.")
+                break
+
+        except StaleElementReferenceException:
+            logging.warning("StaleElementReferenceException caught. Retrying to find and click the button.")
+            continue
+        except TimeoutException:
+            logging.info(f"More content button with text '{button_text}' not found or no longer interactive.")
+            break
+        except ElementClickInterceptedException:
+            logging.warning("Button click intercepted. Trying to click with JavaScript.")
+            try:
+                driver.execute_script("arguments[0].click();", button_to_click)
+                time.sleep(2)
+            except Exception as js_e:
+                logging.error(f"JavaScript click also failed: {js_e}")
+                break
+        except Exception as e:
+            logging.error(f"Error clicking 'more' button: {e}")
+            break
 
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
-    Uses a headless browser to recursively navigate to a URL, extract all visible text
-    from linked pages within the same domain up to a certain depth,
-    and return it in the outbound JSON message.
+    Uses a headless browser to recursively navigate to a URL and extract all visible text.
     """
     initial_url = params.get('url')
     if not initial_url:
         raise ValueError("'url' parameter is missing for 'full_recursive_download'")
 
-    # Ensure the URL has a scheme.
     if not urlparse(initial_url).scheme:
         initial_url = 'https://' + initial_url
 
-    # Canonicalize the initial URL
     initial_url = _canonicalize_url(initial_url)
-
     max_depth = params.get('max_depth', DEFAULT_MAX_DEPTH)
+    more_content_button_text = params.get('more_content_button_text')
 
-    # Create a job-specific directory to avoid conflicts
     job_download_dir = os.path.join(download_dir, job_id)
     os.makedirs(job_download_dir, exist_ok=True)
 
     driver = None
     service = None
     crawled_data = []
-    visited_urls = set() # Stores URLs that have been successfully crawled and their content extracted
-    urls_to_visit = deque([(initial_url, 0)]) # (url, depth) - Queue of URLs to visit
-    queued_urls = {initial_url} # Stores URLs that are currently in urls_to_visit or have been added to it
-
-    # Extract the domain of the initial URL once (from the canonicalized initial_url)
+    visited_urls = set()
+    urls_to_visit = deque([(initial_url, 0)])
+    queued_urls = {initial_url}
     initial_domain = urlparse(initial_url).netloc
 
     try:
@@ -182,11 +191,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         while urls_to_visit:
             current_url, current_depth = urls_to_visit.popleft()
-            
-            # Use discard instead of remove to prevent KeyError if URL is somehow not in queued_urls
-            queued_urls.discard(current_url) 
+            queued_urls.discard(current_url)
 
-            if current_url in visited_urls: # If this URL has already been successfully crawled, skip
+            if current_url in visited_urls:
                 logging.info(f"Skipping already crawled URL: {current_url}")
                 continue
 
@@ -194,6 +201,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
             try:
                 driver.get(current_url)
+                _click_more_button(driver, more_content_button_text)
+
                 body_text = driver.find_element(By.TAG_NAME, 'body').text
                 logging.info(f"Successfully extracted text from {current_url}")
 
@@ -212,13 +221,12 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     'size_bytes': text_size,
                     'warning': warning
                 })
-                visited_urls.add(current_url) # Mark as successfully crawled
+                visited_urls.add(current_url)
 
-                # Extract new links to visit, passing the current_url, initial_domain, and both sets
                 new_links = _get_links_from_page(driver, current_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls)
                 for link, depth in new_links:
                     urls_to_visit.append((link, depth))
-                    queued_urls.add(link) # Add to queued_urls to prevent future duplicates
+                    queued_urls.add(link)
 
             except Exception as e:
                 logging.error(f"Error crawling {current_url} for job {job_id}: {e}", exc_info=True)
@@ -228,12 +236,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     'size_bytes': 0,
                     'error': str(e)
                 })
-                # Do not add to visited_urls if there was an error, so it might be retried if discovered again.
-
 
         result = {
             'job_id': job_id,
-            'status': 'complete',
+            'status':'complete',
             'result': {
                 'crawled_pages': crawled_data,
                 'total_pages_crawled': len(crawled_data)
@@ -249,9 +255,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             driver.quit()
         if service:
             service.stop()
-        # Add a small delay to allow processes to release file handles
         time.sleep(1)
-        # Clean up the temporary directory
         if driver and hasattr(driver, 'temp_dir'):
             try:
                 shutil.rmtree(driver.temp_dir)
@@ -260,10 +264,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     write_result_to_outbound(job_id, result)
 
-
 if __name__ == '__main__':
-    # This block allows the script to be run directly for testing purposes.
-    # Example: python your_script_name.py "https://www.google.com"
     import sys
     import uuid
     import json
@@ -279,13 +280,10 @@ if __name__ == '__main__':
     test_job_id = f"test-job-{uuid.uuid4()}"
     test_params = {'url': test_url, 'max_depth': test_max_depth}
 
-    # Use a standard temporary directory for test output
     test_download_dir = tempfile.gettempdir()
-
 
     def print_result_to_console(job_id, result):
         """A mock writer function that prints the result to the console."""
         print(json.dumps(result, indent=2))
-
 
     execute(test_job_id, test_params, test_download_dir, print_result_to_console)
