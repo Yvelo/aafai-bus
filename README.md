@@ -247,10 +247,12 @@ Recursively navigates to a URL and extracts all visible text from linked pages w
   "action": "full_recursive_download",
   "params": {
     "url": "string",
-    "max_depth": "integer"
+    "max_depth": "integer",
+    "more_content_button_text": "string (optional)"
   }
 }
 ```
+- **`more_content_button_text`**: If provided, the scraper will repeatedly click a button with this text to load more content on a page before extracting text. This is useful for pages that use "infinite scrolling" or "load more" buttons.
 
 ### `docsend_download`
 
