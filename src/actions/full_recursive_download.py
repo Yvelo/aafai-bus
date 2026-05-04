@@ -160,6 +160,107 @@ def _click_more_button(driver, button_text):
             logging.error(f"Error clicking 'more' button: {e}")
             break
 
+def _find_next_page_link(driver):
+    """
+    Finds the 'Next' page link using common heuristics.
+    """
+    # Scroll to the bottom to ensure pagination links are loaded
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    time.sleep(1) # Give some time for elements to load after scroll
+
+    xpaths = [
+        "//a[.//span[@aria-label='Next']]",  # Specific for the biopark site
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'next')]", # "Next" in various cases
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'suivant')]", # "Suivant" (French for Next)
+        "//a[@aria-label='Next Page']",
+        "//a[@rel='next']",
+        "//a[text()='»']", # Common symbol for next
+        "//a[text()='>']", # Common symbol for next
+        "//li[contains(@class, 'pagination-next')]/a", # Common class for next page in lists
+        "//a[contains(@class, 'next')]", # Link with 'next' in its class
+    ]
+
+    for xpath in xpaths:
+        try:
+            # Wait for the element to be clickable
+            next_link_element = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, xpath))
+            )
+            href = next_link_element.get_attribute('href')
+            if href:
+                logging.info(f"Found next page link: {href} using xpath: {xpath}")
+                return href
+        except (NoSuchElementException, TimeoutException):
+            continue
+    logging.info("No next page link found.")
+    return None
+
+def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit_queue):
+    """
+    Handles pagination at depth 0 before proceeding to deeper levels.
+    """
+    urls_to_process_at_depth_0 = deque([(initial_url, 0)])
+
+    while urls_to_process_at_depth_0:
+        current_url, current_depth = urls_to_process_at_depth_0.popleft()
+
+        if current_url in visited_urls:
+            logging.info(f"Skipping already processed paginated URL: {current_url}")
+            continue
+
+        logging.info(f"Crawling paginated URL: {current_url} (Depth: {current_depth})")
+        try:
+            driver.get(current_url)
+            body_text = driver.find_element(By.TAG_NAME, 'body').text
+            text_bytes = body_text.encode('utf-8')
+            text_size = len(text_bytes)
+            warning = None
+
+            if text_size > MAXIMUM_DOWNLOAD_SIZE:
+                warning = f"Text content exceeded {MAXIMUM_DOWNLOAD_SIZE} bytes and was truncated."
+                body_text = text_bytes[:MAXIMUM_DOWNLOAD_SIZE].decode('utf-8', errors='ignore')
+
+            crawled_data.append({
+                'url': current_url,
+                'text': body_text,
+                'size_bytes': text_size,
+                'warning': warning
+            })
+            visited_urls.add(current_url)
+
+            # Extract links for the next depth from this paginated page
+            new_links = _get_links_from_page(driver, current_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls)
+            for link, depth in new_links:
+                if link not in queued_urls:
+                    urls_to_visit_queue.append((link, depth))
+                    queued_urls.add(link)
+
+            # Find and queue the next page at the same depth (0)
+            next_page_url = _find_next_page_link(driver)
+            if next_page_url:
+                clean_next_page_url = _canonicalize_url(urljoin(current_url, next_page_url))
+                parsed_next_url = urlparse(clean_next_page_url)
+                # Ensure the next page is still within the initial domain and not already processed
+                if _normalize_domain(parsed_next_url.netloc) == _normalize_domain(initial_domain) and \
+                   clean_next_page_url not in visited_urls:
+                    urls_to_process_at_depth_0.append((clean_next_page_url, 0))
+                else:
+                    logging.info(f"Next page link {clean_next_page_url} is outside initial domain or already processed. Stopping pagination.")
+            else:
+                logging.info("No more next page links found for pagination.")
+
+
+        except Exception as e:
+            logging.error(f"Error crawling paginated {current_url} for job {job_id}: {e}", exc_info=True)
+            crawled_data.append({
+                'url': current_url,
+                'text': '',
+                'size_bytes': 0,
+                'error': str(e)
+            })
+            # If an error occurs, stop processing further paginated pages to avoid infinite loops on broken links
+            break
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Uses a headless browser to recursively navigate to a URL and extract all visible text.
@@ -182,13 +283,21 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     service = None
     crawled_data = []
     visited_urls = set()
-    urls_to_visit = deque([(initial_url, 0)])
-    queued_urls = {initial_url}
+    urls_to_visit = deque() # This queue will hold links for depth > 0, or all links if not pagination mode
+    queued_urls = {initial_url} # Tracks all URLs that are either visited or in any queue
     initial_domain = urlparse(initial_url).netloc
 
     try:
         driver, service = _setup_driver(job_download_dir)
 
+        if more_content_button_text == "Pagination":
+            # Handle all paginated pages at depth 0 first
+            _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit)
+        else:
+            # If not pagination, start with the initial URL at depth 0
+            urls_to_visit.append((initial_url, 0))
+
+        # Now process the rest of the links (depth > 0 or all links if not pagination)
         while urls_to_visit:
             current_url, current_depth = urls_to_visit.popleft()
             queued_urls.discard(current_url)
@@ -201,7 +310,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
             try:
                 driver.get(current_url)
-                _click_more_button(driver, more_content_button_text)
+                # Only click "more content" button if not in pagination mode
+                if more_content_button_text != "Pagination":
+                    _click_more_button(driver, more_content_button_text)
 
                 body_text = driver.find_element(By.TAG_NAME, 'body').text
                 logging.info(f"Successfully extracted text from {current_url}")
@@ -225,8 +336,9 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
                 new_links = _get_links_from_page(driver, current_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls)
                 for link, depth in new_links:
-                    urls_to_visit.append((link, depth))
-                    queued_urls.add(link)
+                    if link not in queued_urls:
+                        urls_to_visit.append((link, depth))
+                        queued_urls.add(link)
 
             except Exception as e:
                 logging.error(f"Error crawling {current_url} for job {job_id}: {e}", exc_info=True)

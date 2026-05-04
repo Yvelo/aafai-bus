@@ -252,7 +252,9 @@ Recursively navigates to a URL and extracts all visible text from linked pages w
   }
 }
 ```
-- **`more_content_button_text`**: If provided, the scraper will repeatedly click a button with this text to load more content on a page before extracting text. This is useful for pages that use "infinite scrolling" or "load more" buttons.
+- **`more_content_button_text`**: This parameter has two modes:
+    - **Button Text Mode**: If you provide a string like `"Load More"`, the scraper will repeatedly click a button with that text to load more content on a page before extracting text. This is useful for pages that use "infinite scrolling" or "load more" buttons.
+    - **Pagination Mode**: If you provide the special string `"Pagination"`, the scraper will look for "Next" page links and crawl all pages at the initial depth before proceeding to deeper levels.
 
 ### `docsend_download`
 

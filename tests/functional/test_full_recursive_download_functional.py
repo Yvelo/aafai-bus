@@ -97,3 +97,16 @@ class TestFullRecursiveDownloadFunctional:
             "more_content_button_text": "Voir plus de projets"
         }
         self._run_test(job_id, params, temp_dir)
+
+    def test_download_with_pagination(self, temp_dir):
+        """
+        Tests downloading from a page that has a 'Load More' button to load more content.
+        """
+        job_id = "functional-test-download-with-pagination"
+        start_url = "https://www.biopark.be/community/category/members-company-3"
+        params = {
+            "url": start_url,
+            "max_depth": 0,
+            "more_content_button_text": "Pagination"
+        }
+        self._run_test(job_id, params, temp_dir)
