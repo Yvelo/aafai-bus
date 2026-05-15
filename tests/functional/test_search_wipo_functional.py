@@ -2,14 +2,14 @@ import pytest
 from unittest.mock import MagicMock
 import tempfile
 import shutil
-from src.actions.search_uspto import execute
+from src.actions.search_wipo import execute
 
 
 @pytest.mark.functional
-class TestSearchUsptoFunctional:
+class TestSearchWipoFunctional:
     """
-    Functional tests for the search_uspto action.
-    These tests run against the live USPTO website using a real browser.
+    Functional tests for the search_wipo action.
+    These tests run against the live WIPO website using a real browser.
     They are marked as 'functional' and may be slower to run.
     """
 
@@ -27,14 +27,11 @@ class TestSearchUsptoFunctional:
         Tests a real search for patents by keywords to verify the scraper can handle
         a live query. We limit the results to keep the test quick.
         """
-        job_id = "functional-test-keyword-search"
+        job_id = "functional-test-keyword-search-wipo"
         params = {
             "queries": [
-                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "staining"],
-                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "deep learning"],
-                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "semantic segmentation"],
-                ["tissue analysis", "biomarkers", "biopsy", "infrared microscopy", "spectroscopic imaging"],
-                ["tissue analysis", "biomarkers", "biopsy", "staining", "deep learning"],
+                ["quantum computing", "qubit", "superconducting"],
+                ["blockchain", "decentralized", "finance", "solar"]
             ],
             "max_number_of_patents": 15,
         }
@@ -51,4 +48,5 @@ class TestSearchUsptoFunctional:
 
         patents = result['result']['patents']
         assert len(patents) > 0
-        assert len(patents) <= 10000
+        # max_number_of_patents is per query, so total can be up to 15 * 2 = 30
+        assert len(patents) <= params["max_number_of_patents"] * len(params["queries"])

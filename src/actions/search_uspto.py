@@ -239,18 +239,20 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 continue
 
             # Scrape visible patents and scroll until no new patents are found or max is reached
+            patents_scraped_for_this_query = set()
             last_height = -1
-            current_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_element)
             
-            while len(all_patents) < max_patents:
+            while len(patents_scraped_for_this_query) < max_patents:
                 patent_elements = driver.find_elements(By.CSS_SELECTOR, "#search-results-table .grid-canvas .slick-row")
                 for element in patent_elements:
-                    if len(all_patents) >= max_patents:
+                    if len(patents_scraped_for_this_query) >= max_patents:
                         break
                     parsed_patent = _parse_single_patent(element)
                     if parsed_patent and parsed_patent.get("patent_number"):
                         patent_number = parsed_patent["patent_number"]
                         
+                        patents_scraped_for_this_query.add(patent_number)
+
                         if patent_number not in all_patents:
                             logging.info(f"New patent found: {patent_number} with query '{query}'")
                             parsed_patent['keyword_matches'] = len(query_keywords)
