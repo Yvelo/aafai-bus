@@ -8,6 +8,7 @@ import atexit
 import importlib
 import logging
 import signal
+import threading
 from flask import Flask, request, jsonify, render_template, current_app
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -20,6 +21,9 @@ sys.path.insert(0, PROJECT_ROOT)
 # --- Constants ---
 MAX_IDLE_TIME_IN_SECONDS = 1800
 QUEUE_PEREMPTION_DAYS = 7
+
+# --- Global Shutdown Signal ---
+shutdown_event = threading.Event()
 
 def create_app(testing=False):
     """Application factory for the Flask app."""
@@ -69,10 +73,13 @@ def create_app(testing=False):
         executors = {'default': ThreadPoolExecutor(5)}
         job_defaults = {'coalesce': False, 'max_instances': 5}
         scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
-        scheduler.add_job(func=process_inbound_queue, args=[app], trigger='interval', seconds=5, id='process_queue')
-        scheduler.add_job(func=check_idle_shutdown, args=[app], trigger='interval', seconds=30, id='idle_check')
-        scheduler.add_job(func=lambda: purge_old_files(app), trigger='cron', hour=3, id='purge_old_files_daily')
-        atexit.register(lambda: scheduler.shutdown())
+        
+        # Pass the scheduler instance to the jobs that need it
+        scheduler.add_job(func=process_inbound_queue, args=[app, shutdown_event], trigger='interval', seconds=5, id='process_queue')
+        scheduler.add_job(func=check_idle_shutdown, args=[app, scheduler, shutdown_event], trigger='interval', seconds=30, id='idle_check')
+        scheduler.add_job(func=lambda: purge_old_files(app, shutdown_event=shutdown_event), trigger='cron', hour=3, id='purge_old_files_daily')
+        
+        atexit.register(lambda: scheduler.shutdown(wait=False))
         scheduler.start()
         logging.info("Scheduler started with recurring jobs enabled.")
 
@@ -206,8 +213,11 @@ def write_result_to_outbound(job_id, result_data):
     except IOError as e:
         logging.error(f"Error writing result for job {job_id}: {e}")
 
-def process_inbound_queue(app):
+def process_inbound_queue(app, stop_event):
     """Scheduler job to process all tasks in the inbound queue."""
+    if stop_event.is_set():
+        logging.info("Shutdown initiated, skipping queue processing.")
+        return
     with app.app_context():
         base_path = current_app.config['BASE_QUEUE_PATH']
         inbound_queue_dir = os.path.join(base_path, 'inbound')
@@ -292,12 +302,16 @@ def process_single_task(task_filename, app_context):
             if os.path.exists(processing_filepath):
                 shutil.move(processing_filepath, os.path.join(failed_dir, task_filename))
 
-def check_idle_shutdown(app):
+def check_idle_shutdown(app, scheduler, stop_event):
     """
     Checks if the server has been idle AND the inbound and processing queues are empty.
     If both conditions are met, it initiates a graceful VM shutdown.
     """
     with app.app_context():
+        if stop_event.is_set():
+            # Already shutting down, no need to do anything.
+            return
+
         base_path = current_app.config['BASE_QUEUE_PATH']
         inbound_queue_dir = os.path.join(base_path, 'inbound')
         processing_dir = os.path.join(base_path, 'processing')
@@ -319,18 +333,28 @@ def check_idle_shutdown(app):
                     f"Server has been idle for more than {MAX_IDLE_TIME_IN_SECONDS} seconds and queues are empty. "
                     "Initiating VM power off."
                 )
-                # In a real scenario, you'd use a more robust method.
-                # For this example, we'll just log it.
+                # 1. Signal all other threads to stop.
+                stop_event.set()
+                
+                # 2. Shut down the scheduler to prevent new jobs from running.
+                logging.info("Shutting down the scheduler...")
+                scheduler.shutdown(wait=False)
+                
+                # 3. Now, initiate the system power off.
+                logging.info("Scheduler stopped. Issuing power off command.")
                 os.system('sudo /sbin/shutdown --poweroff now')
 
         except (FileNotFoundError, ValueError, IOError) as e:
             logging.warning(f"Could not check idle time: {e}")
 
-def purge_old_files(app, retention_days=None):
+def purge_old_files(app, retention_days=None, shutdown_event=None):
     """
     Deletes files and directories older than the specified number of days.
     If retention_days is not provided, it defaults to QUEUE_PEREMPTION_DAYS.
     """
+    if shutdown_event and shutdown_event.is_set():
+        logging.info("Shutdown initiated, skipping purge job.")
+        return
     with app.app_context():
         days = retention_days if retention_days is not None else QUEUE_PEREMPTION_DAYS
         logging.info(f"Purge job started. Deleting items older than {days} days.")
