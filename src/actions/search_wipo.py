@@ -220,18 +220,30 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     query_index += 1
                     continue
 
-                if query_index == 0:
-                    search_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "simpleSearchForm:fpSearch:input")))
+                # Determine which search form is available by checking for the presence of the search input fields.
+                # This is more robust than relying on the query index, as the page state can change unexpectedly
+                # (e.g., after a query with no results).
+                try:
+                    # Try for the simple search form first (present on the main page and sometimes on 'no results' pages)
+                    search_input = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.ID, "simpleSearchForm:fpSearch:input")))
                     search_button_selector = "button.js-default-button"
-                else:
-                    search_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "advancedSearchForm:advancedSearchInput:input")))
-                    search_button_selector = "button.js-advanced-search-button"
+                except TimeoutException:
+                    # If the simple form is not there, we expect to be on a results page with an advanced search form.
+                    try:
+                        search_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "advancedSearchForm:advancedSearchInput:input")))
+                        search_button_selector = "button.js-advanced-search-button"
+                    except TimeoutException:
+                        # If neither form is found, the page is in an unknown state.
+                        # We'll log an error, navigate to the base URL to reset, and retry the current query.
+                        logging.error("Could not find a known search input field. Resetting page and retrying query.")
+                        driver.get(WIPO_BASE_URL)
+                        continue  # This will re-run the current query_index in the next loop iteration.
 
                 search_input.clear()
                 search_input.send_keys(query)
                 time.sleep(1)
                 search_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, search_button_selector)))
-                search_button.click()
+                driver.execute_script("arguments[0].click();", search_button)
                 logging.info("Search submitted.")
 
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "results-container")))

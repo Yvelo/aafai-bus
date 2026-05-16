@@ -35,6 +35,21 @@ class TestSearchWipoFunctional:
             ],
             "max_number_of_patents": 15,
         }
+        params = {
+            "queries": [
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Transcranial"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Intra-pulse dosimetry"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Passive cavitation detector"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Neuro-navigation"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Robotic steering"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Acoustic pressure monitoring"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Sonication"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Transcranial", "Intra-pulse dosimetry"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Transcranial", "Passive cavitation detector"],
+                ["Ultrasound", "Blood-Brain Barrier", "Microbubbles", "Transcranial", "Neuro-navigation"]
+            ],
+            "max_number_of_patents": 5
+        }
         mock_write_result = MagicMock()
 
         execute(job_id, params, temp_dir, mock_write_result)
