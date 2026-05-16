@@ -278,10 +278,15 @@ def process_single_task(task_filename, app_context):
         except Exception as e:
             error_message = f"An unexpected error occurred while processing task {task_filename}: {e}"
             logging.error(error_message, exc_info=True)
-            if task_to_process and task_to_process.get('job_id'):
-                job_id = task_to_process.get('job_id')
-            
-            result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+            if task_to_process:
+                job_id = task_to_process.get('job_id', 'unknown')
+                # Preserve original task data and add error info
+                task_to_process['status'] = 'failed'
+                task_to_process['error'] = str(e)
+                result = task_to_process
+            else:
+                result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+
             write_result_to_outbound(job_id, result)
             
             if os.path.exists(processing_filepath):
