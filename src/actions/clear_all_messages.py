@@ -38,7 +38,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     result = {
         'job_id': job_id,
-        'status': 'complete',
+        'status': 'Completed',
         'result': {
             'message': 'All queues cleared successfully.',
             'cleared_queues': reported_cleared_queues

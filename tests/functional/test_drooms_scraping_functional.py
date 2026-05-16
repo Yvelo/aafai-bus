@@ -82,7 +82,7 @@ def test_drooms_scraping_live():
 
         # Basic assertion: Check if the action reported completion.
         assert result is not None, "The action did not return a result."
-        assert result.get("status") == "complete", f"The action failed with message: {result.get('message')}"
+        assert result.get("status") == "Completed", f"The action failed with message: {result.get('message')}"
 
         # The download root is now hardcoded in the action itself
         download_root = 'C:/temp/drooms_scraping'

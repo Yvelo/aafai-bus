@@ -228,7 +228,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound, quit_driver=
         
         final_patents = list(all_patents.values())
         final_patents.sort(key=lambda x: x.get('keyword_matches', 0), reverse=True)
-        result = {'job_id': job_id, 'status': 'complete', 'result': {'total_patents_scraped': len(final_patents), 'patents': final_patents}}
+        result = {'job_id': job_id, 'status': 'Completed', 'result': {'total_patents_scraped': len(final_patents), 'patents': final_patents}}
 
     except Exception as e:
         logging.error(f"An error occurred during Espacenet search for job {job_id}: {e}", exc_info=True)

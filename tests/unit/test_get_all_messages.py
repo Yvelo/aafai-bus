@@ -71,7 +71,7 @@ def test_get_all_messages(tmp_path, app):
     result_job_id, result_data = args
 
     assert result_job_id == job_id
-    assert result_data['status'] == 'complete'
+    assert result_data['status'] == 'Completed'
     messages = result_data['result']
     assert len(messages['inbound']) == 1
     assert messages['inbound'][0] == inbound_msg

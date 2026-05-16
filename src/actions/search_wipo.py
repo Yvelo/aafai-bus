@@ -275,11 +275,31 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                         break
 
                     try:
+                        # Wait for any loading overlays to disappear
                         WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.ui-blockui-content")))
-                        next_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.js-paginator-next:not(.ui-state-disabled)")))
-                        driver.execute_script("arguments[0].click();", next_button)
+                        
+                        # Find and click the 'next' button. This is a common point for StaleElementReferenceException,
+                        # so we'll retry the click a few times if that happens.
+                        for attempt in range(3):
+                            try:
+                                next_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.js-paginator-next:not(.ui-state-disabled)")))
+                                driver.execute_script("arguments[0].click();", next_button)
+                                # If click succeeds, break the retry loop
+                                break
+                            except StaleElementReferenceException:
+                                logging.warning(f"StaleElementReferenceException on 'next' button click, attempt {attempt + 1}/3. Retrying...")
+                                time.sleep(1) # Brief pause for the DOM to settle
+                        else:
+                            # This 'else' belongs to the 'for' loop. It runs if the loop completes without a 'break'.
+                            # This means all attempts to click failed due to StaleElementReferenceException.
+                            logging.error("Failed to click 'next' button due to repeated StaleElementReferenceExceptions.")
+                            break # Break the outer 'while' loop for pagination
+
                     except (NoSuchElementException, TimeoutException, ElementClickInterceptedException):
-                        break
+                        # This block will catch errors if the 'next' button isn't found or clickable within the timeout,
+                        # which is the expected way to end pagination.
+                        logging.info("No more pages or 'next' button is not available.")
+                        break # Break the 'while' loop for pagination
                 
                 query_index += 1
 
@@ -310,7 +330,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             except (TimeoutException, NoSuchElementException) as e:
                 logging.warning(f"Could not fetch details for {patent['patent_number']}: {e}")
 
-        result = {'job_id': job_id, 'status': 'complete', 'result': {'total_patents_scraped': len(all_patents), 'patents': list(all_patents.values())}}
+        result = {'job_id': job_id, 'status': 'Completed', 'result': {'total_patents_scraped': len(all_patents), 'patents': list(all_patents.values())}}
 
     except Exception as e:
         logging.error(f"An error occurred during WIPO search for job {job_id}: {e}", exc_info=True)

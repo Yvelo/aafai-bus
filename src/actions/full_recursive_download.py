@@ -351,7 +351,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         result = {
             'job_id': job_id,
-            'status':'complete',
+            'status':'Completed',
             'result': {
                 'crawled_pages': crawled_data,
                 'total_pages_crawled': len(crawled_data)

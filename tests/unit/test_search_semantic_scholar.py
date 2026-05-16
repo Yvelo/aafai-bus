@@ -91,7 +91,7 @@ class TestSearchSemanticScholarUnit:
             mock_write_result.assert_called_once()
             _, result = mock_write_result.call_args[0]
 
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert len(result['result']['articles']) == 2
 
             # Results are sorted by citation count (desc), so article 2 should be first.
@@ -136,7 +136,7 @@ class TestSearchSemanticScholarUnit:
             mock_write_result.assert_called_once()
             _, result = mock_write_result.call_args[0]
 
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert len(result['result']['articles']) == 0
             assert result['result']['total_results_scraped'] == 0
         finally:

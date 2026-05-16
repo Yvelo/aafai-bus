@@ -79,7 +79,7 @@ def test_docsend_scraping_live():
 
 
         assert result is not None, "The action did not return a result."
-        assert result.get("status") == "complete", f"The action failed with error: {result.get('error')}"
+        assert result.get("status") == "Completed", f"The action failed with error: {result.get('error')}"
         assert "result" in result, "The 'result' key is missing from the successful response."
 
         action_result = result.get("result")

@@ -62,7 +62,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 encoded_string = base64.b64encode(pdf_file.read()).decode('utf-8')
             result = {
                 "job_id": job_id,
-                "status": "complete",
+                "status": "Completed",
                 "result": {
                     "downloaded_files": [
                         {

@@ -72,7 +72,7 @@ def test_execute_success(mock_process_all, mock_gather_all, mock_setup_driver, m
     # The final success message uses a hardcoded path
     expected_download_root = 'C:/temp/drooms_scraping'
     write_mock.assert_called_with(job_id, {
-        "status": "complete", 
+        "status": "Completed",
         "message": f"D-Rooms scraping completed. Files saved to {expected_download_root}"
     })
     

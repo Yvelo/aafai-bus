@@ -12,7 +12,7 @@ def test_check_task_status_success(client, app):
     job_id = str(uuid.uuid4())
     expected_result = {
         'job_id': job_id,
-        'status': 'complete',
+        'status': 'Completed',
         'result': 'The process finished successfully.'
     }
 

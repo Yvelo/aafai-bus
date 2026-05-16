@@ -1,6 +1,6 @@
 import os
 import json
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from src.server import process_inbound_queue
 
 def test_process_inbound_queue_malformed_json(app):
@@ -17,9 +17,12 @@ def test_process_inbound_queue_malformed_json(app):
     with open(malformed_filepath, 'w') as f:
         f.write("{'invalid_json': True,}")
 
+    stop_event = MagicMock()
+    stop_event.is_set.return_value = False
+
     # 2. ACT
     with patch('src.server.write_result_to_outbound') as mock_write_result:
-        process_inbound_queue(app)
+        process_inbound_queue(app, stop_event)
 
     # 3. ASSERT
     assert not os.path.exists(malformed_filepath)
@@ -48,9 +51,12 @@ def test_process_inbound_queue_unknown_action(app):
     with open(task_filepath, 'w') as f:
         json.dump(task_data, f)
 
+    stop_event = MagicMock()
+    stop_event.is_set.return_value = False
+
     # 2. ACT
     with patch('src.server.write_result_to_outbound') as mock_write_result:
-        process_inbound_queue(app)
+        process_inbound_queue(app, stop_event)
 
     # 3. ASSERT
     assert not os.path.exists(task_filepath)

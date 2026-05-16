@@ -195,7 +195,7 @@ def check_task_status():
         for f in os.listdir(failed_dir):
             if job_id in f:
                 return jsonify({'status': 'failed', 'message': 'Job failed during processing.'})
-        return jsonify({'status': 'Pending', 'message': 'Job not yet complete.'})
+        return jsonify({'status': 'Pending', 'message': 'Job not yet completed.'})
 
 
 def page_not_found(e):
@@ -229,11 +229,11 @@ def process_inbound_queue(app, stop_event):
         
         # Process all files in the directory, not just the first one
         for task_filename in sorted(os.listdir(inbound_queue_dir)):
-            process_single_task(task_filename, app.app_context)
+            process_single_task(task_filename, app)
 
-def process_single_task(task_filename, app_context):
+def process_single_task(task_filename, app):
     """Processes a single task file from the inbound queue."""
-    with app_context():
+    with app.app_context():
         base_path = current_app.config['BASE_QUEUE_PATH']
         inbound_queue_dir = os.path.join(base_path, 'inbound')
         processing_dir = os.path.join(base_path, 'processing')

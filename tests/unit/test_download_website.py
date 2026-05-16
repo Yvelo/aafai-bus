@@ -41,7 +41,7 @@ class TestDownloadWebsite(unittest.TestCase):
         self.write_result_to_outbound.assert_called_once()
         args, _ = self.write_result_to_outbound.call_args
         self.assertEqual(args[0], self.job_id)
-        self.assertEqual(args[1]['status'], 'complete')
+        self.assertEqual(args[1]['status'], 'Completed')
 
     def test_missing_parameters(self):
         execute(self.job_id, {"url": "http://example.com"}, self.test_dir, self.write_result_to_outbound)

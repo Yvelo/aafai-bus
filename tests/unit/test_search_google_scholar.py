@@ -122,7 +122,7 @@ class TestSearchGoogleScholarUnit:
             _, result = mock_write_result.call_args[0]
 
             assert result['job_id'] == job_id
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert 'result' in result
             assert 'articles' in result['result']
             assert len(result['result']['articles']) == 2  # Expecting 2 mocked articles
@@ -193,7 +193,7 @@ class TestSearchGoogleScholarUnit:
             _, result = mock_write_result.call_args[0]
 
             assert result['job_id'] == job_id
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert 'articles' in result['result']
             assert len(result['result']['articles']) == 0
             assert result['result']['total_results_scraped'] == 0
@@ -310,7 +310,7 @@ class TestSearchGoogleScholarUnit:
             _, result = mock_write_result.call_args[0]
 
             assert result['job_id'] == job_id
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert 'articles' in result['result']
             assert len(result['result']['articles']) == 3  # 2 from page 1 + 1 from page 2
 

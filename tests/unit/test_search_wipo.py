@@ -114,7 +114,7 @@ class TestSearchWipoUnit:
             mock_write_result.assert_called_once()
             _, result = mock_write_result.call_args[0]
 
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert len(result['result']['patents']) == 2
 
             patents = sorted(result['result']['patents'], key=lambda p: p['patent_number'])
@@ -173,7 +173,7 @@ class TestSearchWipoUnit:
             mock_write_result.assert_called_once()
             _, result = mock_write_result.call_args[0]
 
-            assert result['status'] == 'complete'
+            assert result['status'] == 'Completed'
             assert len(result['result']['patents']) == 0
             assert result['result']['total_patents_scraped'] == 0
         finally:

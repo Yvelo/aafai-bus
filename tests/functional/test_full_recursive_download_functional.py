@@ -52,7 +52,7 @@ class TestFullRecursiveDownloadFunctional:
         print(result)
 
         assert result['job_id'] == job_id
-        assert result['status'] == 'complete'
+        assert result['status'] == 'Completed'
         assert 'error' not in result
 
         # Verify that the job-specific directory was created

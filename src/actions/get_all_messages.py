@@ -31,7 +31,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     result = {
         'job_id': job_id,
-        'status': 'complete',
+        'status': 'Completed',
         'result': all_messages
     }
     write_result_to_outbound(job_id, result)

@@ -70,7 +70,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         all_items = _gather_all_items(driver)
         _process_all_items(driver, all_items, download_root)
 
-        result = {"status": "complete", "message": f"D-Rooms scraping completed. Files saved to {download_root}"}
+        result = {"status": "Completed", "message": f"D-Rooms scraping completed. Files saved to {download_root}"}
 
     except Exception as e:
         print(f"An error occurred during D-Rooms scraping: {e}")
@@ -175,7 +175,7 @@ def _expand_all_folders(driver, debug_mode=False):
         try:
             collapsed_folders = driver.find_elements(By.CSS_SELECTOR, "app-index-list-point.folder:not(.expanded)")
             if not collapsed_folders:
-                print("--- No more collapsed folders found. Expansion complete. ---")
+                print("--- No more collapsed folders found. Expansion completed. ---")
                 break
             
             folder_to_expand = collapsed_folders[0]

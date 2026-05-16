@@ -43,7 +43,7 @@ class TestSearchSemanticScholarFunctional:
         _, result = mock_write_result.call_args[0]
 
         assert result['job_id'] == job_id
-        assert result['status'] == 'complete'
+        assert result['status'] == 'Completed'
         assert 'error' not in result
 
         articles = result['result']['articles']
@@ -74,7 +74,7 @@ class TestSearchSemanticScholarFunctional:
         _, result = mock_write_result.call_args[0]
 
         assert result['job_id'] == job_id
-        assert result['status'] == 'complete'
+        assert result['status'] == 'Completed'
         assert 'error' not in result
 
         articles = result['result']['articles']

@@ -46,6 +46,6 @@ def test_clear_all_messages(app):
     result_job_id, result_data = args
 
     assert result_job_id == job_id
-    assert result_data['status'] == 'complete'
+    assert result_data['status'] == 'Completed'
     assert result_data['result']['message'] == 'All queues cleared successfully.'
     assert set(result_data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}

@@ -386,7 +386,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 logging.info("No next page button found or it was not clickable. Ending pagination.")
                 break
         all_results.sort(key=lambda x: x.get('citations', 0), reverse=True)
-        result = {'job_id': job_id, 'status': 'complete', 'result': {'search_query': query_params, 'total_results_scraped': len(all_results), 'estimated_article_count': estimated_articles, 'estimated_citation_count': estimated_citations, 'matched_authors': matched_authors, 'articles': all_results}}
+        result = {'job_id': job_id, 'status': 'Completed', 'result': {'search_query': query_params, 'total_results_scraped': len(all_results), 'estimated_article_count': estimated_articles, 'estimated_citation_count': estimated_citations, 'matched_authors': matched_authors, 'articles': all_results}}
     except Exception as e:
         logging.error(f"An error occurred during Semantic Scholar search for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}

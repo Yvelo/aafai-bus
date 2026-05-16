@@ -13,7 +13,7 @@ def poll_for_result(client, job_id, timeout=30):
         if response.status_code == 200:
             data = response.get_json()
             logging.info(f"Polling for job {job_id}, status: {data.get('status')}")
-            if data.get('status') == 'complete':
+            if data.get('status') == 'Completed':
                 return data
         time.sleep(0.5)
     return None
@@ -32,7 +32,7 @@ def test_get_all_messages_action_empty(client, app):
 
     # 3. ASSERT
     assert data is not None, "Polling for result timed out."
-    assert data['status'] == 'complete'
+    assert data['status'] == 'Completed'
     messages = data['result']
     assert messages['inbound'] == []
     assert messages['consumed'] == []
@@ -69,7 +69,7 @@ def test_get_all_messages_action_with_data(client, app):
 
     # 3. ASSERT
     assert data is not None, "Polling for result timed out."
-    assert data['status'] == 'complete'
+    assert data['status'] == 'Completed'
     messages = data['result']
     
     # The inbound message created for the test should be present.
@@ -111,7 +111,7 @@ def test_clear_all_messages_action(client, app):
 
     # 3. ASSERT
     assert data is not None, "Polling for result timed out."
-    assert data['status'] == 'complete'
+    assert data['status'] == 'Completed'
     assert data['result']['message'] == 'All queues cleared successfully.'
     assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}
 
@@ -146,7 +146,7 @@ def test_clear_all_messages_action_when_empty(client, app):
 
     # 3. ASSERT
     assert data is not None, "Polling for result timed out."
-    assert data['status'] == 'complete'
+    assert data['status'] == 'Completed'
     assert data['result']['message'] == 'All queues cleared successfully.'
     # Even if empty, the action reports it "cleared" them.
     assert set(data['result']['cleared_queues']) == {'inbound', 'consumed', 'failed'}

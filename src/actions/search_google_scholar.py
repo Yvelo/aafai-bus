@@ -445,7 +445,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         
         result = {
             'job_id': job_id,
-            'status': 'complete',
+            'status': 'Completed',
             'result': {
                 'search_query': query_params,
                 'total_results_scraped': len(all_results),
