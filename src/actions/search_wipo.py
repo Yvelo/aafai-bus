@@ -273,30 +273,49 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
                 patents_scraped_this_query = 0
                 while patents_scraped_this_query < max_patents_per_query:
-                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "tr[data-rk]")))
-                    patent_elements = driver.find_elements(By.CSS_SELECTOR, "tr[data-rk]")
-                    
-                    for element in patent_elements:
-                        if patents_scraped_this_query >= max_patents_per_query:
-                            break
-                        parsed_patent = _parse_single_patent(element)
-                        if parsed_patent and parsed_patent.get("patent_number"):
-                            patent_number = parsed_patent["patent_number"]
+                    # Add a retry loop for robustness against stale elements during page processing
+                    page_processed_successfully = False
+                    for attempt in range(3):
+                        try:
+                            WebDriverWait(driver, 10).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "tr[data-rk]")))
+                            patent_elements = driver.find_elements(By.CSS_SELECTOR, "tr[data-rk]")
+
+                            for element in patent_elements:
+                                if patents_scraped_this_query >= max_patents_per_query:
+                                    break
+                                parsed_patent = _parse_single_patent(element)
+                                if parsed_patent and parsed_patent.get("patent_number"):
+                                    patent_number = parsed_patent["patent_number"]
+
+                                    if patent_number not in all_patents:
+                                        patents_scraped_this_query += 1
+                                        logging.info(f"New patent found: {patent_number} ({patents_scraped_this_query}/"
+                                                     f"{max_patents_per_query}) with query '{query}'")
+                                        parsed_patent['keyword_matches'] = len(query_keywords)
+                                        parsed_patent['matching_keywords'] = query_keywords
+                                        parsed_patent['total_patents_in_query'] = total_patents_found
+                                        all_patents[patent_number] = parsed_patent
+                                    elif len(query_keywords) > all_patents[patent_number].get('keyword_matches', 0):
+                                        logging.info(
+                                            f"Updating patent {patent_number} with a better keyword match from query "
+                                            f"'{query}'")
+                                        all_patents[patent_number]['keyword_matches'] = len(query_keywords)
+                                        all_patents[patent_number]['matching_keywords'] = query_keywords
+                                        all_patents[patent_number]['total_patents_in_query'] = total_patents_found
                             
-                            if patent_number not in all_patents:
-                                patents_scraped_this_query += 1
-                                logging.info(f"New patent found: {patent_number} ({patents_scraped_this_query}/"
-                                             f"{max_patents_per_query}) with query '{query}'")
-                                parsed_patent['keyword_matches'] = len(query_keywords)
-                                parsed_patent['matching_keywords'] = query_keywords
-                                parsed_patent['total_patents_in_query'] = total_patents_found
-                                all_patents[patent_number] = parsed_patent
-                            elif len(query_keywords) > all_patents[patent_number].get('keyword_matches', 0):
-                                logging.info(f"Updating patent {patent_number} with a better keyword match from query "
-                                             f"'{query}'")
-                                all_patents[patent_number]['keyword_matches'] = len(query_keywords)
-                                all_patents[patent_number]['matching_keywords'] = query_keywords
-                                all_patents[patent_number]['total_patents_in_query'] = total_patents_found
+                            page_processed_successfully = True
+                            break  # Break from retry loop if successful
+
+                        except StaleElementReferenceException:
+                            logging.warning(
+                                f"StaleElementReferenceException during page processing (attempt {attempt + 1}/3). Retrying.")
+                            time.sleep(2)  # Wait a bit for the DOM to settle
+
+                    if not page_processed_successfully:
+                        logging.error(
+                            "Failed to process page after 3 attempts due to StaleElementReferenceException. Breaking pagination.")
+                        break
                     
                     if patents_scraped_this_query >= max_patents_per_query:
                         break
