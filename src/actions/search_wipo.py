@@ -15,7 +15,8 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
 import re
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException, ElementClickInterceptedException
+from selenium.common.exceptions import (TimeoutException, NoSuchElementException,
+                                        StaleElementReferenceException, ElementClickInterceptedException)
 from selenium.webdriver.common.action_chains import ActionChains
 
 # Base URL for WIPO
@@ -40,7 +41,9 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-logging")
     chrome_options.add_argument("--disable-dev-tools")
     chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/108.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1920,1080")
 
     # Anti-scraping measures from original implementation
@@ -69,7 +72,8 @@ def _setup_driver(job_download_dir):
     
     # Enable verbose logging for chromedriver
     chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(),
+                      service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
 
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.set_page_load_timeout(60)
@@ -87,15 +91,18 @@ def _get_field(element, selector):
     except (NoSuchElementException, StaleElementReferenceException):
         return None
 
+
 def _get_detail_field(driver, label):
     """Safely extracts a field from the patent detail page by its label."""
     try:
-        xpath = f"//span[contains(@class, 'ps-biblio-field--label') and .//span[contains(., '{label}')]]/following-sibling::span[contains(@class, 'ps-biblio-field--value')]"
+        xpath = (f"//span[contains(@class, 'ps-biblio-field--label') and .//span[contains(., '{label}')]]"
+                 f"/following-sibling::span[contains(@class, 'ps-biblio-field--value')]")
         element = driver.find_element(By.XPATH, xpath)
         return element.text.strip()
     except (NoSuchElementException, StaleElementReferenceException):
         logging.debug(f"Could not find detail field for label: {label}")
         return None
+
 
 def _parse_single_patent(patent_element):
     """
@@ -135,7 +142,7 @@ def _parse_single_patent(patent_element):
     patent_data['pages'] = None
     patent_data['filing_date'] = None
     patent_data['application_number'] = None
-    patent_data['applicant_name'] = patent_data['assignee'] # Often the same for WIPO results
+    patent_data['applicant_name'] = patent_data['assignee']  # Often the same for WIPO results
 
     return patent_data
 
@@ -161,7 +168,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         driver.get(WIPO_BASE_URL)
         
         try:
-            accept_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
+            accept_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
             accept_button.click()
             logging.info("Accepted all cookies.")
         except TimeoutException:
@@ -173,13 +181,15 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             query_keywords = queries[query_index]
             
             if query_index > 0 and query_index % MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION == 0:
-                logging.info(f"Reached query limit for session ({MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION}). Restarting driver.")
+                logging.info(f"Reached query limit for session ({MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION}). "
+                             f"Restarting driver.")
                 driver.quit()
                 time.sleep(2)
                 driver = _setup_driver(job_download_dir)
                 driver.get(WIPO_BASE_URL)
                 try:
-                    accept_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
+                    accept_button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
                     accept_button.click()
                     logging.info("Accepted all cookies.")
                 except TimeoutException:
@@ -203,7 +213,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                             time.sleep(5)
                             driver = _setup_driver(job_download_dir)
                             driver.get(WIPO_BASE_URL)
-                            break # Break from CAPTCHA loop to retry query
+                            break  # Break from CAPTCHA loop to retry query
                         
                         images = captcha_form.find_elements(By.CSS_SELECTOR, "a[id^='click']")
                         if not images:
@@ -225,12 +235,14 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 # (e.g., after a query with no results).
                 try:
                     # Try for the simple search form first (present on the main page and sometimes on 'no results' pages)
-                    search_input = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.ID, "simpleSearchForm:fpSearch:input")))
+                    search_input = WebDriverWait(driver, 3).until(
+                        EC.presence_of_element_located((By.ID, "simpleSearchForm:fpSearch:input")))
                     search_button_selector = "button.js-default-button"
                 except TimeoutException:
                     # If the simple form is not there, we expect to be on a results page with an advanced search form.
                     try:
-                        search_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "advancedSearchForm:advancedSearchInput:input")))
+                        search_input = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.ID, "advancedSearchForm:advancedSearchInput:input")))
                         search_button_selector = "button.js-advanced-search-button"
                     except TimeoutException:
                         # If neither form is found, the page is in an unknown state.
@@ -242,14 +254,16 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 search_input.clear()
                 search_input.send_keys(query)
                 time.sleep(1)
-                search_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, search_button_selector)))
+                search_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, search_button_selector)))
                 driver.execute_script("arguments[0].click();", search_button)
                 logging.info("Search submitted.")
 
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "results-container")))
                 logging.info("Search results container loaded.")
 
-                total_patents_element = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "span.results-count")))
+                total_patents_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "span.results-count")))
                 total_patents_found = int(total_patents_element.text.replace(',', '').split()[0])
                 logging.info(f"Total patents found for query '{query}': {total_patents_found}")
 
@@ -266,40 +280,57 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                         if patents_scraped_this_query >= max_patents_per_query:
                             break
                         parsed_patent = _parse_single_patent(element)
-                        if parsed_patent and parsed_patent.get("patent_number") not in all_patents:
-                            patents_scraped_this_query += 1
-                            logging.info(f"New patent found: {parsed_patent['patent_number']} ({patents_scraped_this_query}/{max_patents_per_query})")
-                            all_patents[parsed_patent['patent_number']] = parsed_patent
+                        if parsed_patent and parsed_patent.get("patent_number"):
+                            patent_number = parsed_patent["patent_number"]
+                            
+                            if patent_number not in all_patents:
+                                patents_scraped_this_query += 1
+                                logging.info(f"New patent found: {patent_number} ({patents_scraped_this_query}/"
+                                             f"{max_patents_per_query}) with query '{query}'")
+                                parsed_patent['keyword_matches'] = len(query_keywords)
+                                parsed_patent['matching_keywords'] = query_keywords
+                                parsed_patent['total_patents_in_query'] = total_patents_found
+                                all_patents[patent_number] = parsed_patent
+                            elif len(query_keywords) > all_patents[patent_number].get('keyword_matches', 0):
+                                logging.info(f"Updating patent {patent_number} with a better keyword match from query "
+                                             f"'{query}'")
+                                all_patents[patent_number]['keyword_matches'] = len(query_keywords)
+                                all_patents[patent_number]['matching_keywords'] = query_keywords
+                                all_patents[patent_number]['total_patents_in_query'] = total_patents_found
                     
                     if patents_scraped_this_query >= max_patents_per_query:
                         break
 
                     try:
                         # Wait for any loading overlays to disappear
-                        WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.ui-blockui-content")))
+                        WebDriverWait(driver, 10).until(
+                            EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.ui-blockui-content")))
                         
                         # Find and click the 'next' button. This is a common point for StaleElementReferenceException,
                         # so we'll retry the click a few times if that happens.
                         for attempt in range(3):
                             try:
-                                next_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.js-paginator-next:not(.ui-state-disabled)")))
+                                next_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+                                    (By.CSS_SELECTOR, "a.js-paginator-next:not(.ui-state-disabled)")))
                                 driver.execute_script("arguments[0].click();", next_button)
                                 # If click succeeds, break the retry loop
                                 break
                             except StaleElementReferenceException:
-                                logging.warning(f"StaleElementReferenceException on 'next' button click, attempt {attempt + 1}/3. Retrying...")
-                                time.sleep(1) # Brief pause for the DOM to settle
+                                logging.warning(f"StaleElementReferenceException on 'next' button click, "
+                                                f"attempt {attempt + 1}/3. Retrying...")
+                                time.sleep(1)  # Brief pause for the DOM to settle
                         else:
                             # This 'else' belongs to the 'for' loop. It runs if the loop completes without a 'break'.
                             # This means all attempts to click failed due to StaleElementReferenceException.
-                            logging.error("Failed to click 'next' button due to repeated StaleElementReferenceExceptions.")
-                            break # Break the outer 'while' loop for pagination
+                            logging.error("Failed to click 'next' button due to repeated "
+                                          "StaleElementReferenceExceptions.")
+                            break  # Break the outer 'while' loop for pagination
 
                     except (NoSuchElementException, TimeoutException, ElementClickInterceptedException):
                         # This block will catch errors if the 'next' button isn't found or clickable within the timeout,
                         # which is the expected way to end pagination.
                         logging.info("No more pages or 'next' button is not available.")
-                        break # Break the 'while' loop for pagination
+                        break  # Break the 'while' loop for pagination
                 
                 query_index += 1
 
@@ -312,7 +343,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         for patent in all_patents.values():
             try:
                 driver.get(patent['link'])
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.ps-biblio-data--biblio-card")))
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ps-biblio-data--biblio-card")))
                 
                 try:
                     abstract_element = driver.find_element(By.CSS_SELECTOR, "div.patent-abstract")
@@ -320,8 +352,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 except NoSuchElementException:
                     patent['abstract'] = "Abstract not found."
 
-                patent['filing_date'] = _get_detail_field(driver, 'Application Date') or _get_detail_field(driver, 'Filing Date')
-                patent['application_number'] = _get_detail_field(driver, 'Application Number') or _get_detail_field(driver, 'Publication Number')
+                patent['filing_date'] = _get_detail_field(driver, 'Application Date') or _get_detail_field(driver,
+                                                                                                         'Filing Date')
+                patent['application_number'] = (_get_detail_field(driver, 'Application Number')
+                                                or _get_detail_field(driver, 'Publication Number'))
                 patent['date_published'] = _get_detail_field(driver, 'Publication Date') or patent['date_published']
                 patent['inventor'] = _get_detail_field(driver, 'Inventors') or patent['inventor']
                 patent['applicant_name'] = _get_detail_field(driver, 'Applicants') or patent['assignee']
@@ -330,7 +364,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             except (TimeoutException, NoSuchElementException) as e:
                 logging.warning(f"Could not fetch details for {patent['patent_number']}: {e}")
 
-        result = {'job_id': job_id, 'status': 'Completed', 'result': {'total_patents_scraped': len(all_patents), 'patents': list(all_patents.values())}}
+        final_patents = list(all_patents.values())
+        final_patents.sort(key=lambda x: x.get('keyword_matches', 0), reverse=True)
+        result = {'job_id': job_id, 'status': 'Completed',
+                  'result': {'total_patents_scraped': len(final_patents), 'patents': final_patents}}
 
     except Exception as e:
         logging.error(f"An error occurred during WIPO search for job {job_id}: {e}", exc_info=True)
@@ -356,6 +393,7 @@ if __name__ == '__main__':
     test_params = json.loads(sys.argv[1])
     test_job_id = f"test-wipo-job-{uuid.uuid4()}"
     test_download_dir = tempfile.mkdtemp()
+
     def print_result_to_console(job_id, result):
         print(json.dumps(result, indent=2))
     execute(test_job_id, test_params, test_download_dir, print_result_to_console)
