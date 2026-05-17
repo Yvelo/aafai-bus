@@ -195,6 +195,78 @@ def _find_next_page_link(driver):
     logging.info("No next page link found.")
     return None
 
+def _handle_login(driver, params):
+    """
+    Handles login if username and password are provided in the parameters.
+    """
+    username = params.get('username')
+    password = params.get('password')
+
+    if not username or not password:
+        return
+
+    logging.info("Username and password provided. Attempting to log in.")
+    try:
+        # Common locators for username/email fields
+        username_locators = [
+            (By.ID, "username"), (By.ID, "email"),
+            (By.NAME, "username"), (By.NAME, "email"),
+            (By.XPATH, "//input[@type='email']"), (By.XPATH, "//input[@type='text' and contains(@name, 'user')]")
+        ]
+        # Common locators for password fields
+        password_locators = [
+            (By.ID, "password"), (By.NAME, "password"),
+            (By.XPATH, "//input[@type='password']")
+        ]
+        # Common locators for login buttons
+        login_button_locators = [
+            (By.ID, "login"), (By.ID, "submit"),
+            (By.NAME, "login"), (By.NAME, "submit"),
+            (By.XPATH, "//button[@type='submit']"), (By.XPATH, "//input[@type='submit']")
+        ]
+
+        # Find and fill username
+        for by, value in username_locators:
+            try:
+                username_field = driver.find_element(by, value)
+                username_field.send_keys(username)
+                logging.info(f"Found and filled username field with locator: {(by, value)}")
+                break
+            except NoSuchElementException:
+                continue
+        else:
+            logging.warning("Could not find a username field.")
+            return
+
+        # Find and fill password
+        for by, value in password_locators:
+            try:
+                password_field = driver.find_element(by, value)
+                password_field.send_keys(password)
+                logging.info(f"Found and filled password field with locator: {(by, value)}")
+                break
+            except NoSuchElementException:
+                continue
+        else:
+            logging.warning("Could not find a password field.")
+            return
+
+        # Find and click login button
+        for by, value in login_button_locators:
+            try:
+                login_button = driver.find_element(by, value)
+                login_button.click()
+                logging.info(f"Found and clicked login button with locator: {(by, value)}")
+                time.sleep(5) # Wait for page to load after login
+                break
+            except (NoSuchElementException, ElementClickInterceptedException):
+                continue
+        else:
+            logging.warning("Could not find or click a login button.")
+
+    except Exception as e:
+        logging.error(f"An error occurred during login: {e}")
+
 def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit_queue):
     """
     Handles pagination at depth 0 before proceeding to deeper levels.
@@ -289,6 +361,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
     try:
         driver, service = _setup_driver(job_download_dir)
+        driver.get(initial_url)
+        _handle_login(driver, params)
 
         if more_content_button_text == "Pagination":
             # Handle all paginated pages at depth 0 first
