@@ -399,14 +399,35 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     pass
 
             except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
-                logging.warning(f"Could not fetch abstract for {patent_number}: {e}", exc_info=True)
-                all_patents[patent_number]['abstract'] = "Error fetching abstract."
-                # Navigate back to base URL to reset state for the next attempt
+                logging.warning(f"Could not fetch details for {patent_number}. Error: {str(e)}", exc_info=True)
+
+                # --- Enhanced Debugging ---
                 try:
-                    driver.get(USPTO_BASE_URL)
-                    time.sleep(2)
-                except TimeoutException:
-                    logging.error("Failed to navigate back to base URL after an error.")
+                    # Save a screenshot for debugging
+                    screenshot_path = os.path.join(job_download_dir, f"error_{patent_number}.png")
+                    driver.save_screenshot(screenshot_path)
+                    logging.info(f"Saved error screenshot to {screenshot_path}")
+
+                    # Save page source
+                    page_source_path = os.path.join(job_download_dir, f"error_{patent_number}.html")
+                    with open(page_source_path, "w", encoding="utf-8") as f:
+                        f.write(driver.page_source)
+                    logging.info(f"Saved page source to {page_source_path}")
+                except Exception as debug_e:
+                    logging.error(f"Could not save debug info: {debug_e}")
+                # --- End Enhanced Debugging ---
+
+
+                all_patents[patent_number]['abstract'] = "Error fetching details."
+
+                # Force-restart the driver to get a clean session
+                logging.info("Encountered an error. Restarting browser session to recover.")
+                driver.quit()
+                time.sleep(2)
+                driver = _setup_driver(job_download_dir)
+                queries_in_session = 0
+                driver.get(USPTO_BASE_URL) # Start fresh
+                time.sleep(2)
 
 
         final_patents = list(all_patents.values())
