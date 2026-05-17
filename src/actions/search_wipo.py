@@ -182,8 +182,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         search_iterations = queries if queries else [[]]
 
         query_index = 0
-        captcha_attempts = 0
         while query_index < len(search_iterations):
+            captcha_attempts = 0
             query_keywords = search_iterations[query_index]
             
             if query_index > 0 and query_index % MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION == 0:
