@@ -258,6 +258,7 @@ def process_single_task(task_filename, app):
         task_to_process = None
         job_id = "unknown"
         try:
+            logging.info(f"Starting processing of task file: {task_filename}")
             with open(processing_filepath, 'r') as f:
                 task_to_process = json.load(f)
 
@@ -275,12 +276,15 @@ def process_single_task(task_filename, app):
 
             # Dynamically import from 'src.actions'
             try:
+                logging.info(f"Attempting to import action module: src.actions.{action_name}")
                 action_module = importlib.import_module(f"src.actions.{action_name}")
             except ModuleNotFoundError:
                 raise ValueError(f"Action '{action_name}' not found in 'src/actions'.")
 
             # Pass the app context to the action
+            logging.info(f"Executing action for job {job_id}")
             action_module.execute(job_id, params, download_dir, write_result_to_outbound)
+            logging.info(f"Action execution completed for job {job_id}")
 
             consumed_filepath = os.path.join(consumed_dir, task_filename)
             shutil.move(processing_filepath, consumed_filepath)
