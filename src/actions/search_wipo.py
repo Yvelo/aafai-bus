@@ -170,7 +170,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         try:
             accept_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
-            accept_button.click()
+            driver.execute_script("arguments[0].click();", accept_button)
             logging.info("Accepted all cookies.")
         except TimeoutException:
             logging.info("No cookie banner found or could not be closed.")
@@ -190,7 +190,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 try:
                     accept_button = WebDriverWait(driver, 5).until(
                         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept All')]")))
-                    accept_button.click()
+                    driver.execute_script("arguments[0].click();", accept_button)
                     logging.info("Accepted all cookies.")
                 except TimeoutException:
                     logging.info("No cookie banner found or could not be closed.")
@@ -220,7 +220,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                             logging.error("CAPTCHA form found, but no images to click.")
                             break
                         
-                        random.choice(images).click()
+                        driver.execute_script("arguments[0].click();", random.choice(images))
                         time.sleep(3)
                     except NoSuchElementException:
                         logging.info("CAPTCHA solved or not present.")
