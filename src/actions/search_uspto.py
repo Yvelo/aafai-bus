@@ -124,6 +124,25 @@ def _parse_single_patent(patent_element):
     return patent_data
 
 
+def _handle_initial_popups(driver):
+    """Handles cookie disclaimers and other initial pop-ups."""
+    try:
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button"))).click()
+        logging.info("Dismissed cookie disclaimer.")
+    except TimeoutException:
+        logging.info("No cookie disclaimer found or could not be closed.")
+    
+    try:
+        # Use a more generic XPath to find close buttons on pop-up banners
+        close_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(@aria-label, 'close') or contains(@aria-label, 'Close')]"))
+        )
+        close_button.click()
+        logging.info("Closed a pop-up banner.")
+    except TimeoutException:
+        logging.info("No generic pop-up banner found or it was not clickable.")
+
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Performs a USPTO patent search based on the provided queries,
@@ -153,20 +172,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         except TimeoutException:
             logging.warning("Initial page load timed out, but continuing.")
 
-        try:
-            WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button"))).click()
-            logging.info("Dismissed cookie disclaimer.")
-        except TimeoutException:
-            logging.info("No cookie disclaimer found or could not be closed.")
-        
-        try:
-            close_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(@aria-label, 'close') or contains(@aria-label, 'Close')]"))
-            )
-            close_button.click()
-            logging.info("Closed a pop-up banner.")
-        except TimeoutException:
-            logging.info("No generic pop-up banner found.")
+        _handle_initial_popups(driver)
 
         for query_keywords in queries:
             if queries_in_session >= MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION:
@@ -176,10 +182,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver = _setup_driver(job_download_dir)
                 queries_in_session = 0
                 driver.get(USPTO_BASE_URL)
-                try:
-                    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button"))).click()
-                except TimeoutException:
-                    pass
+                _handle_initial_popups(driver)
             
             queries_in_session += 1
             processed_keywords = []
@@ -288,9 +291,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 time.sleep(2)
                 driver = _setup_driver(job_download_dir)
                 queries_in_session = 0
-                # After restarting, navigate to the base URL to ensure a clean state
                 driver.get(USPTO_BASE_URL)
-                time.sleep(2) # Allow time for the page to load and stabilize
+                _handle_initial_popups(driver)
 
             patent_number = patent.get("patent_number")
             if not patent_number:
@@ -317,21 +319,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "search-btn-search")))
                 search_button.click()
 
-                # Handle pop-ups after search
-                try:
-                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button"))).click()
-                    logging.info(f"Dismissed cookie disclaimer for {patent_number}.")
-                except TimeoutException:
-                    pass
-                
-                try:
-                    close_button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(@aria-label, 'close') or contains(@aria-label, 'Close')]"))
-                    )
-                    close_button.click()
-                    logging.info("Closed a pop-up banner.")
-                except TimeoutException:
-                    pass
+                # Handle pop-ups that might appear after a search
+                _handle_initial_popups(driver)
 
                 abstract_container = WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div.abstractNode div.abstract")))
                 paragraphs = abstract_container.find_elements(By.TAG_NAME, 'p')
@@ -427,7 +416,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver = _setup_driver(job_download_dir)
                 queries_in_session = 0
                 driver.get(USPTO_BASE_URL) # Start fresh
-                time.sleep(2)
+                _handle_initial_popups(driver)
 
 
         final_patents = list(all_patents.values())
