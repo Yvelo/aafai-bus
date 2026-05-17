@@ -154,8 +154,10 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     logging.info(f"Executing search_wipo for job {job_id} with params: {json.dumps(params, indent=2)}")
     queries = params.get('queries', [])
-    if not queries:
-        raise ValueError("'queries' parameter is missing or empty for 'search_wipo'")
+    brand = params.get('brand')
+
+    if not queries and not brand:
+        raise ValueError("Either 'queries' or 'brand' parameter must be provided for 'search_wipo'")
 
     max_patents_per_query = params.get('max_number_of_patents', DEFAULT_MAX_NUMBER_OF_PATENTS)
     job_download_dir = os.path.join(download_dir, job_id)
@@ -175,10 +177,14 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         except TimeoutException:
             logging.info("No cookie banner found or could not be closed.")
 
+        # If only a brand is provided, we'll do one search. If queries are provided, we iterate through them.
+        # If both are provided, we iterate through queries and add the brand to each.
+        search_iterations = queries if queries else [[]]
+
         query_index = 0
         captcha_attempts = 0
-        while query_index < len(queries):
-            query_keywords = queries[query_index]
+        while query_index < len(search_iterations):
+            query_keywords = search_iterations[query_index]
             
             if query_index > 0 and query_index % MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION == 0:
                 logging.info(f"Reached query limit for session ({MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION}). "
@@ -196,7 +202,17 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                     logging.info("No cookie banner found or could not be closed.")
 
             processed_keywords = [f'"{k.strip()}"' if ' ' in k.strip() else k.strip() for k in query_keywords]
+            
+            # Add brand to the query if it exists. The field code for "Applicant" (assignee) is 'PA'.
+            if brand:
+                processed_keywords.append(f'PA:("{brand}")')
+
             query = " AND ".join(processed_keywords)
+            if not query:
+                logging.warning("Empty query generated. Skipping.")
+                query_index += 1
+                continue
+                
             logging.info(f"Performing search for query: '{query}'")
 
             try:
