@@ -275,14 +275,14 @@ Recursively navigates to a URL and extracts all visible text from linked pages w
     - **Button Text Mode**: If you provide a string like `"Load More"`, the scraper will repeatedly click a button with that text to load more content on a page before extracting text. This is useful for pages that use "infinite scrolling" or "load more" buttons.
     - **Pagination Mode**: If you provide the special string `"Pagination"`, the scraper will look for "Next" page links and crawl all pages at the initial depth before proceeding to deeper levels.
 
-### `docsend_download`
+### `docsend_scraping`
 
 Downloads a document from a DocSend link, handling optional passcodes.
 
 **Input JSON Format:**
 ```json
 {
-  "action": "docsend_download",
+  "action": "docsend_scraping",
   "params": {
     "url": "string",
     "user_email": "string  (optional)",
@@ -291,14 +291,14 @@ Downloads a document from a DocSend link, handling optional passcodes.
 }
 ```
 
-### `scrape_droom`
+### `drooms_scraping`
 
 Scrapes detailed information from a Droom.org profile page.
 
 **Input JSON Format:**
 ```json
 {
-  "action": "scrape_droom",
+  "action": "drooms_scraping",
   "params": {
     "url": "string"
   }
