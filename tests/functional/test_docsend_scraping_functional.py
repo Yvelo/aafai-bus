@@ -34,9 +34,9 @@ def test_docsend_scraping_live():
     It will access a DocSend link, enter an email, and scrape the document.
     """
     # --- Test Configuration ---
-    DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/view/zgq9bdaraucmbt8u')
-    USER_EMAIL = os.environ.get('USER_EMAIL', 'ylm@aaf.lu')
-    DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20260430 Imuveo') # Default name if not set
+    DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/presentation_users/43xd-4Lz-ynyjaPhxQ5u?redirect_url=https%3A%2F%2Fdocsend.com%2Fview%2F4h7wsd7bjekjy895')
+    USER_EMAIL = os.environ.get('USER_EMAIL', 'yvesloicmartin@aaf.lu')
+    DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20260529 Dude Chem') # Default name if not set
 
     # Use C:/temp as the base for test outputs to avoid long path issues
     base_path = 'C:/temp'

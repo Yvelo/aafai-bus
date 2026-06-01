@@ -285,7 +285,8 @@ Downloads a document from a DocSend link, handling optional passcodes.
   "action": "docsend_download",
   "params": {
     "url": "string",
-    "passcode": "string (optional)"
+    "user_email": "string  (optional)",
+    "document_name": "string"
   }
 }
 ```
