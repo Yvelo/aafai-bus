@@ -24,7 +24,10 @@ from webdriver_manager.core.driver_cache import DriverCacheManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException
+from selenium.webdriver.common.keys import Keys # Import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+import requests
 from PIL import Image
 from io import BytesIO
 
@@ -51,9 +54,12 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         driver, service = _setup_driver(download_dir)
 
         _navigate_and_authenticate(driver, url, user_email)
+        _handle_overlays(driver) # Handle overlays once after navigation
+        time.sleep(2) # Add a delay after handling overlays
 
         _wait_for_viewer(driver)
 
+        # Capture every page of the document by navigating from slide to slide
         captured_slides = _capture_all_slides(driver)
 
         if captured_slides:
@@ -135,7 +141,6 @@ def _navigate_and_authenticate(driver, url, email_address):
     """Navigates to the URL and handles the email submission form."""
     logging.info(f"Navigating to: {url}")
     driver.get(url)
-    _handle_overlays(driver)
 
     try:
         email_input = WebDriverWait(driver, 15).until(
@@ -163,9 +168,11 @@ def _navigate_and_authenticate(driver, url, email_address):
 
 def _wait_for_viewer(driver):
     """Waits for the presentation viewer to load."""
-    next_button_selector = (By.ID, "nextPageButton")
+    # The viewer is loaded when the carousel-inner is present and has a certain height
     try:
-        WebDriverWait(driver, 20).until(expected_conditions.presence_of_element_located(next_button_selector))
+        WebDriverWait(driver, 20).until(
+            expected_conditions.presence_of_element_located((By.CSS_SELECTOR, ".carousel-inner.js-carousel-inner"))
+        )
         logging.info("Presentation viewer loaded.")
     except TimeoutException as e:
         logging.error("Presentation viewer did not load in time.")
@@ -199,52 +206,161 @@ def _handle_overlays(driver):
 
 
 def _capture_all_slides(driver):
-    """Browses through the presentation and captures each slide."""
-    captured_slides = []
-    total_slides = _get_total_slides(driver)
+    """
+    Captures every page of the document by navigating from slide to slide.
+    Returns a list of PIL Image objects, one per page.
+    """
+    total_slides = _get_total_slides_count(driver)
+    if not total_slides:
+        total_slides = _count_carousel_items(driver) or 1
 
-    logging.info("\nStarting slide capture...")
-    current_slide_num = 0
-    while True:
-        try:
-            _handle_overlays(driver)
+    logging.info(f"\nStarting capture of {total_slides} slides...")
+    slides = []
 
-            next_button_selector = (By.ID, "nextPageButton")
-            next_button_element = WebDriverWait(driver, 10).until(
-                expected_conditions.element_to_be_clickable(next_button_selector)
-            )
+    for page_number in range(1, total_slides + 1):
+        slide_image = _capture_current_slide(driver, page_number)
+        if slide_image is not None:
+            slides.append(slide_image)
+            logging.info(f"Captured slide {page_number}/{total_slides}.")
+        else:
+            logging.warning(f"Could not capture slide {page_number}/{total_slides}.")
 
-            current_page_element = driver.find_element(By.ID, "page-number")
-            current_slide_num = int(current_page_element.text)
-            time.sleep(1)
-
-            active_content_selector = (By.CSS_SELECTOR, ".item.active .viewer_content-container")
-            content_element = WebDriverWait(driver, 10).until(
-                expected_conditions.visibility_of_element_located(active_content_selector)
-            )
-
-            png_data = content_element.screenshot_as_png
-            slide_image = Image.open(BytesIO(png_data))
-            captured_slides.append(slide_image.convert('RGB'))
-            logging.info(f"Captured slide {current_slide_num}/{total_slides if total_slides > 0 else '?'}")
-
-            if total_slides and current_slide_num >= total_slides:
-                logging.info("Reached the last slide. Finishing capture.")
+        if page_number < total_slides:
+            if not _go_to_next_slide(driver, page_number):
+                logging.warning(f"Could not navigate past slide {page_number}. Stopping capture.")
                 break
 
-            next_button_element.click()
+    logging.info(f"Finished capturing slides. Total: {len(slides)}")
+    return slides
 
-        except (NoSuchElementException, TimeoutException):
-            logging.info(f"End of presentation detected after slide {current_slide_num}.")
-            break
+
+def _count_carousel_items(driver):
+    """Returns the number of slide items present in the carousel."""
+    try:
+        return len(driver.find_elements(By.CSS_SELECTOR, ".carousel-inner.js-carousel-inner .item"))
+    except Exception:
+        return 0
+
+
+def _get_active_page_image_element(driver, timeout=30):
+    """Waits for the image of the currently active slide to be fully loaded and returns it."""
+    selector = ".carousel-inner.js-carousel-inner .item.active img.page-view"
+
+    def _loaded_image(drv):
+        elements = drv.find_elements(By.CSS_SELECTOR, selector)
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+                is_loaded = drv.execute_script(
+                    "return arguments[0].complete && arguments[0].naturalWidth > 0;", element
+                )
+                if is_loaded:
+                    return element
+            except StaleElementReferenceException:
+                continue
+        return False
+
+    return WebDriverWait(driver, timeout).until(_loaded_image)
+
+
+def _capture_current_slide(driver, page_number):
+    """
+    Captures the currently displayed slide.
+    The original, full resolution page image is downloaded when possible;
+    otherwise the rendered element is screenshotted as a fallback.
+    """
+    try:
+        image_element = _get_active_page_image_element(driver)
+    except TimeoutException:
+        logging.warning(f"Slide {page_number} image did not load in time.")
+        return None
+
+    image_url = image_element.get_attribute('src')
+    image = _download_image(driver, image_url)
+    if image is not None:
+        return image
+
+    try:
+        return Image.open(BytesIO(image_element.screenshot_as_png)).convert('RGB')
+    except Exception as e:
+        logging.warning(f"Could not screenshot slide {page_number}: {e}")
+        return None
+
+
+def _download_image(driver, image_url):
+    """Downloads a page image using the browser session cookies. Returns a PIL Image or None."""
+    if not image_url:
+        return None
+    try:
+        session = requests.Session()
+        for cookie in driver.get_cookies():
+            session.cookies.set(cookie['name'], cookie['value'])
+        headers = {
+            'User-Agent': driver.execute_script("return navigator.userAgent;"),
+            'Referer': driver.current_url
+        }
+        response = session.get(image_url, headers=headers, timeout=60)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content)).convert('RGB')
+    except Exception as e:
+        logging.warning(f"Could not download page image, falling back to screenshot: {e}")
+        return None
+
+
+def _go_to_next_slide(driver, current_page_number):
+    """
+    Advances the viewer to the next slide and waits until the active slide actually changed.
+    Returns True when the navigation succeeded.
+    """
+    previous_index = _get_active_slide_index(driver)
+
+    # The viewer ignores synthetic JS clicks, so real user interactions are required.
+    for attempt, navigate in enumerate((_send_arrow_right, _click_next_button)):
+        try:
+            navigate(driver)
         except Exception as e:
-            logging.error(f"An unexpected error occurred during slide navigation: {e}")
-            raise
+            logging.warning(f"Navigation attempt {attempt + 1} failed for slide {current_page_number}: {e}")
+            continue
 
-    return captured_slides
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda drv: _get_active_slide_index(drv) not in (previous_index, -1)
+            )
+            time.sleep(0.5) # Let the new slide settle before capturing it
+            return True
+        except TimeoutException:
+            logging.warning(f"The active slide did not change after slide {current_page_number}.")
+
+    return False
 
 
-def _get_total_slides(driver):
+def _send_arrow_right(driver):
+    """Sends the right arrow key to the viewer to move to the next slide."""
+    driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
+
+
+def _click_next_button(driver):
+    """Performs a real mouse click on the viewer's next page control."""
+    next_button = driver.find_element(By.ID, "nextPageButton")
+    ActionChains(driver).move_to_element(next_button).click().perform()
+
+
+def _get_active_slide_index(driver):
+    """Returns the zero-based index of the currently active slide, or -1 if unknown."""
+    try:
+        return driver.execute_script(
+            "var items = document.querySelectorAll('.carousel-inner.js-carousel-inner .item');"
+            "for (var i = 0; i < items.length; i++) {"
+            "  if (items[i].classList.contains('active')) { return i; }"
+            "}"
+            "return -1;"
+        )
+    except Exception:
+        return -1
+
+
+def _get_total_slides_count(driver):
     """Determines the total number of slides from the page indicator."""
     try:
         page_indicator_element = WebDriverWait(driver, 10).until(
