@@ -134,7 +134,7 @@ class TestDocsendScrapingFunctional:
         It will access a DocSend link, enter an email, and scrape the document.
         """
         # --- Test Configuration ---
-        DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/view/zbkgdd8xwrmgei6r/d/v5ehufatzfq4c27a')
+        DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/view/zbkgdd8xwrmgei6r/d/nrpbisdwhy2k8wnv')
         USER_EMAIL = os.environ.get('USER_EMAIL', 'yvesloicmartin@aaf.lu')
         DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '02_BP_AcceleraDx Business Plan 2026 V1') # Default name if not set
 
@@ -163,7 +163,9 @@ class TestDocsendScrapingFunctional:
         Tests processing a collection of DocSend downloads.
         """
         docsend_documents = [
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/zsbyrtaee2e5bx4v","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_AcceleraDx Business Plan 2026 V1","passcode":""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/v5ehufatzfq4c27a","user_email":"yvesloicmartin@aaf.lu","document_name":"01_Presentation_AcceleraDx slide deck","passcode":""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/nrpbisdwhy2k8wnv","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_AcceleraDx Business Plan 2026 V1","passcode":""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/2ca668dgh7a4ergd","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_Accelera DX Org Chart","passcode":""},
             {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/hammg5pxqmtc7kfw","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_FUNseq platform and workflow","passcode":""},
             {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/jyxqhpgbwthgfx9m","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_UFO_Intelligent High-Throughput Live-Cell Imaging & Selection Platform","passcode":""},
             {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/c6x6psw33vqsgc2s","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_TRACER_AI-Based Real-Time Cell Tracking and Behavior Analysis","passcode":""},

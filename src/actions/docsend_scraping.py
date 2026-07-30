@@ -214,6 +214,13 @@ def _capture_all_slides(driver):
     if not total_slides:
         total_slides = _count_carousel_items(driver) or 1
 
+    # Some documents are rendered in a vertically scrolling viewer where every page
+    # image is already part of the DOM. In that case all pages can be downloaded directly.
+    slides = _capture_all_page_images(driver, total_slides)
+    if slides:
+        logging.info(f"Finished capturing slides. Total: {len(slides)}")
+        return slides
+
     logging.info(f"\nStarting capture of {total_slides} slides...")
     slides = []
 
@@ -232,6 +239,68 @@ def _capture_all_slides(driver):
 
     logging.info(f"Finished capturing slides. Total: {len(slides)}")
     return slides
+
+
+def _capture_all_page_images(driver, total_slides):
+    """
+    Tries to download every page image directly from the DOM (vertical viewer layout).
+    Returns a list of PIL Images, or an empty list when the layout does not expose all pages.
+    """
+    image_urls = _collect_page_image_urls(driver)
+    if len(image_urls) < total_slides:
+        _scroll_viewer_to_load_all_pages(driver)
+        image_urls = _collect_page_image_urls(driver)
+
+    if not image_urls or len(image_urls) < total_slides:
+        return []
+
+    logging.info(f"All {len(image_urls)} page images are available in the viewer. Downloading them directly...")
+    slides = []
+    for page_number, image_url in enumerate(image_urls[:total_slides], start=1):
+        image = _download_image(driver, image_url)
+        if image is None:
+            logging.warning(f"Could not download page image {page_number}. Falling back to slide navigation.")
+            return []
+        slides.append(image)
+        logging.info(f"Captured slide {page_number}/{total_slides}.")
+    return slides
+
+
+def _collect_page_image_urls(driver):
+    """Returns the source URLs of all loaded page images, in document order."""
+    try:
+        return driver.execute_script(
+            "return Array.from(document.querySelectorAll('img.page-view'))"
+            "  .filter(function (img) { return img.complete && img.naturalWidth > 0; })"
+            "  .map(function (img) { return img.currentSrc || img.src; })"
+            "  .filter(function (src) { return !!src; });"
+        ) or []
+    except Exception:
+        return []
+
+
+def _scroll_viewer_to_load_all_pages(driver):
+    """Scrolls the vertical viewer to the bottom so that lazily loaded page images are fetched."""
+    try:
+        container = driver.find_element(By.CSS_SELECTOR, ".carousel-inner.js-carousel-inner")
+    except NoSuchElementException:
+        return
+
+    try:
+        scroll_height = driver.execute_script("return arguments[0].scrollHeight;", container)
+        viewport_height = driver.execute_script("return arguments[0].clientHeight;", container)
+        if not scroll_height or not viewport_height or scroll_height <= viewport_height:
+            return
+
+        position = 0
+        while position < scroll_height:
+            driver.execute_script("arguments[0].scrollTop = arguments[1];", container, position)
+            time.sleep(0.5)
+            position += viewport_height
+        driver.execute_script("arguments[0].scrollTop = 0;", container)
+        time.sleep(0.5)
+    except Exception as e:
+        logging.warning(f"Could not scroll the viewer to preload page images: {e}")
 
 
 def _count_carousel_items(driver):
