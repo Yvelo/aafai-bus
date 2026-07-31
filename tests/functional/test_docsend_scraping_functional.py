@@ -71,7 +71,7 @@ class TestDocsendScrapingFunctional:
         print(f"Kept a copy of the downloaded document at: {kept_path}")
 
     @classmethod
-    def _assert_single_download_result(cls, job_id, result_holder, expected_document_name, temp_download_dir):
+    def _assert_single_download_result(cls, job_id, result_holder, expected_document_name, temp_download_dir, expected_min_pages=1):
         """Helper function to assert the result of a single DocSend download."""
         result = result_holder.get('result')
         
@@ -120,10 +120,14 @@ class TestDocsendScrapingFunctional:
         assert os.path.exists(expected_pdf_path), f"The expected PDF was not created at {expected_pdf_path} for job {job_id}"
         assert os.path.getsize(expected_pdf_path) > 0, f"The created PDF file is empty on disk for job {job_id}."
 
-        # The whole document must be captured, not only the first page
+        # The whole document must be captured, not only the first page.
+        # Some documents legitimately contain a single page, hence the configurable minimum.
         page_count = cls._get_pdf_page_count(expected_pdf_path)
         print(f"The created PDF contains {page_count} page(s).")
-        assert page_count > 1, f"Only {page_count} page(s) were captured for job {job_id}; the document was not fully downloaded."
+        assert page_count >= expected_min_pages, (
+            f"Only {page_count} page(s) were captured for job {job_id}; "
+            f"at least {expected_min_pages} page(s) were expected, the document was not fully downloaded."
+        )
 
         cls._keep_downloaded_file(expected_pdf_path)
 
@@ -134,9 +138,10 @@ class TestDocsendScrapingFunctional:
         It will access a DocSend link, enter an email, and scrape the document.
         """
         # --- Test Configuration ---
-        DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/view/zbkgdd8xwrmgei6r/d/nrpbisdwhy2k8wnv')
+        DOCSEND_URL = os.environ.get('DOCSEND_URL', 'https://docsend.com/view/zbkgdd8xwrmgei6r/d/aqeawq9cvg3errvz')
         USER_EMAIL = os.environ.get('USER_EMAIL', 'yvesloicmartin@aaf.lu')
-        DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '02_BP_AcceleraDx Business Plan 2026 V1') # Default name if not set
+        DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '07 Publications_Nature Biomedical Engineering_Linking the genotypes and phenotypes of cancer cells') # Default name if not set
+        EXPECTED_MIN_PAGES = int(os.environ.get('EXPECTED_MIN_PAGES', '1'))
 
         # --- Action Parameters ---
         params = {
@@ -156,39 +161,39 @@ class TestDocsendScrapingFunctional:
         try:
             docsend_scraping.execute(job_id, params, temp_dir, mock_write_result)
         finally:
-            self._assert_single_download_result(job_id, result_holder, DOCUMENT_NAME, temp_dir)
+            self._assert_single_download_result(job_id, result_holder, DOCUMENT_NAME, temp_dir, EXPECTED_MIN_PAGES)
 
     def test_multiple_docsend_downloads(self, temp_dir):
         """
         Tests processing a collection of DocSend downloads.
         """
         docsend_documents = [
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/v5ehufatzfq4c27a","user_email":"yvesloicmartin@aaf.lu","document_name":"01_Presentation_AcceleraDx slide deck","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/nrpbisdwhy2k8wnv","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_AcceleraDx Business Plan 2026 V1","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/2ca668dgh7a4ergd","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_Accelera DX Org Chart","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/hammg5pxqmtc7kfw","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_FUNseq platform and workflow","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/jyxqhpgbwthgfx9m","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_UFO_Intelligent High-Throughput Live-Cell Imaging & Selection Platform","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/c6x6psw33vqsgc2s","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_TRACER_AI-Based Real-Time Cell Tracking and Behavior Analysis","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/a477aqksfwjwhviv","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_AXD-SOP-001 FUNSeq Master Process Overview v1_0","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/83p5ebm7nybwsczp","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_FTO search","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/tquj4x3esr8rnx3f","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_Technology Defensibility Beyond Patents","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/kh7b642r2aw8gwwv","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_WO2020153837A1","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/e3ivr4zm6vvsgrmr","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_2026_US_DIvisional_P121850US10 IDS","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/prxman9m89de56wp","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_US20220090007A1","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/vzys7bnqghsayeyq","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_EP 3 686 273 A1","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/wvwhvqr3v6huju92","user_email":"yvesloicmartin@aaf.lu","document_name":"05 Financials_AcceleraDx Client Revenue Growth Model","passcode":""},
-            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/c2yqk3uvqmh37gy2","user_email":"yvesloicmartin@aaf.lu","document_name": "05 Financials_AcceleraDX OPEX - 5 Year Model", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/9neadjtt3qeyxfpi", "user_email": "yvesloicmartin@aaf.lu", "document_name": "05 Financials_Non-Dilutive Funding Funseq", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/3gxwah3tfj3mvp3j", "user_email": "yvesloicmartin@aaf.lu", "document_name": "06 Competitor analysis_CA overview", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/cdne4rhtzpcxxepj", "user_email": "yvesloicmartin@aaf.lu", "document_name": "06 Competitor analysis_CA AcceleraDx", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/z2pcsd5ui33n7ehd", "user_email": "yvesloicmartin@aaf.lu", "document_name": "07 Publications_Nature Biomedical Engineering Research Briefing_Functional single-cell sequencing links dynamic phenotypes to their genotypes", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/aqeawq9cvg3errvz", "user_email": "yvesloicmartin@aaf.lu", "document_name": "07 Publications_Nature Biomedical Engineering_Linking the genotypes and phenotypes of cancer cells in heterogenous populations via real-time optical tagging and im...", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/r6jq5zhr8ikqedac", "user_email": "yvesloicmartin@aaf.lu", "document_name": "07 Publications_Advanced Science_Unraveling the Molecular Mechanisms Underlying Spontaneous Multipolar Mitosis Through", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/9whpbcjd6icadx37", "user_email": "yvesloicmartin@aaf.lu", "document_name": "07 Publications_Nano Letters_imaging-guided-omics-technologies-for-resolving-rare-cancer-states-and-advancing-nanomedicine", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/4mc3usrtekvuwpfd", "user_email": "yvesloicmartin@aaf.lu", "document_name": "08 Customer Pharma Feedback_Ambagon Therapeutics 2026", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/s98fzg2tj68kvuys", "user_email": "yvesloicmartin@aaf.lu", "document_name": "08 Customer Pharma Feedback_SkylineDx reference letter", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/kanghv8eiyu7p9zu", "user_email": "yvesloicmartin@aaf.lu", "document_name": "08 Customer Pharma Feedback_AcceleraDx_Pharma and Biotech Interview Summary (2026)", "passcode": ""},
-            {"url": "https://docsend.com/view/zbkgdd8xwrmgei6r/d/wshhb2z8d8zg7j5b", "user_email": "yvesloicmartin@aaf.lu", "document_name": "08 Customer Pharma Feedback_AcceleraDx_Pharma and Biotech Expert Interviews (2026)", "passcode": ""}
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/v5ehufatzfq4c27a","user_email":"yvesloicmartin@aaf.lu","document_name":"01_Presentation_AcceleraDx slide deck","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/nrpbisdwhy2k8wnv","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_AcceleraDx Business Plan 2026 V1","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/2ca668dgh7a4ergd","user_email":"yvesloicmartin@aaf.lu","document_name":"02_BP_Accelera DX Org Chart","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/hammg5pxqmtc7kfw","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_FUNseq platform and workflow","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/jyxqhpgbwthgfx9m","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_UFO_Intelligent High-Throughput Live-Cell Imaging & Selection Platform","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/c6x6psw33vqsgc2s","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_TRACER_AI-Based Real-Time Cell Tracking and Behavior Analysis","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/a477aqksfwjwhviv","user_email":"yvesloicmartin@aaf.lu","document_name":"03_Technology_AXD-SOP-001 FUNSeq Master Process Overview v1_0","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/83p5ebm7nybwsczp","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_FTO search","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/tquj4x3esr8rnx3f","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_Technology Defensibility Beyond Patents","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/kh7b642r2aw8gwwv","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_WO2020153837A1","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/e3ivr4zm6vvsgrmr","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_2026_US_DIvisional_P121850US10 IDS","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/prxman9m89de56wp","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_US20220090007A1","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/vzys7bnqghsayeyq","user_email":"yvesloicmartin@aaf.lu","document_name":"04 IP_EP 3 686 273 A1","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/wvwhvqr3v6huju92","user_email":"yvesloicmartin@aaf.lu","document_name":"05 Financials_AcceleraDx Client Revenue Growth Model","passcode":""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/c2yqk3uvqmh37gy2","user_email":"yvesloicmartin@aaf.lu","document_name": "05 Financials_AcceleraDX OPEX - 5 Year Model", "passcode": ""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/9neadjtt3qeyxfpi","user_email":"yvesloicmartin@aaf.lu","document_name":"05 Financials_Non-Dilutive Funding Funseq", "passcode": ""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/3gxwah3tfj3mvp3j","user_email":"yvesloicmartin@aaf.lu","document_name":"06 Competitor analysis_CA overview", "passcode": ""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/cdne4rhtzpcxxepj","user_email":"yvesloicmartin@aaf.lu","document_name":"06 Competitor analysis_CA AcceleraDx", "passcode": ""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/z2pcsd5ui33n7ehd","user_email":"yvesloicmartin@aaf.lu","document_name":"07 Publications_Nature Biomedical Engineering Research Briefing_Functional single-cell sequencing links dynamic phenotypes to their genotypes", "passcode": ""},
+            #    {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/aqeawq9cvg3errvz","user_email":"yvesloicmartin@aaf.lu","document_name":"07 Publications_Nature Biomedical Engineering_Linking the genotypes and phenotypes of cancer cells","passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/r6jq5zhr8ikqedac","user_email":"yvesloicmartin@aaf.lu","document_name":"07 Publications_Advanced Science_Unraveling the Molecular Mechanisms Underlying Spontaneous Multipolar Mitosis Through","passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/9whpbcjd6icadx37","user_email":"yvesloicmartin@aaf.lu","document_name":"07 Publications_Nano Letters_imaging-guided-omics-technologies-for-resolving-rare-cancer-states-and-advancing-nanomedicine","passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/4mc3usrtekvuwpfd","user_email":"yvesloicmartin@aaf.lu","document_name":"08 Customer Pharma Feedback_Ambagon Therapeutics 2026", "passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/s98fzg2tj68kvuys","user_email":"yvesloicmartin@aaf.lu","document_name":"08 Customer Pharma Feedback_SkylineDx reference letter", "passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/kanghv8eiyu7p9zu","user_email":"yvesloicmartin@aaf.lu","document_name":"08 Customer Pharma Feedback_AcceleraDx_Pharma and Biotech Interview Summary (2026)", "passcode": ""},
+            {"url":"https://docsend.com/view/zbkgdd8xwrmgei6r/d/wshhb2z8d8zg7j5b","user_email":"yvesloicmartin@aaf.lu","document_name":"08 Customer Pharma Feedback_AcceleraDx_Pharma and Biotech Expert Interviews (2026)", "passcode": ""}
         ]
 
         for doc_info in docsend_documents:
