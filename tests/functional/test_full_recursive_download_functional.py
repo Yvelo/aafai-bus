@@ -103,11 +103,11 @@ class TestFullRecursiveDownloadFunctional:
         Tests downloading from a page that has a 'Load More' button to load more content.
         """
         job_id = "functional-test-download-with-pagination"
-        start_url = "https://www.biopark.be/community/category/members-company-3"
+        start_url = "https://curie.fr/les-start-ups-issues-de-linstitut-curie"
         params = {
             "url": start_url,
-            "max_depth": 0,
-            "more_content_button_text": "Pagination"
+            "max_depth": 1,
+            "more_content_button_text": "Pagination" # Correctly set to trigger pagination logic
         }
         self._run_test(job_id, params, temp_dir)
 

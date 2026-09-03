@@ -30,7 +30,7 @@ def _setup_driver(job_download_dir):
     chrome_options.add_argument("--disable-crash-reporter")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-in-process-stack-traces")
-    chrome_options.add_argument("--disable-logging")
+    chrome_argument("--disable-logging")
     chrome_options.add_argument("--disable-dev-tools")
     chrome_options.add_argument("--window-size=1920,1080")
 
@@ -86,15 +86,31 @@ def _canonicalize_url(url):
         clean_path = '/'
     return urlunparse(parsed_url_no_fragment._replace(path=clean_path))
 
-def _get_links_from_page(driver, current_page_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls):
+def _is_under_start_url(url, initial_url):
     """
-    Extracts all valid, same-domain links from the current page.
+    Checks that a URL is on the same domain as the start URL and located under its path.
+    """
+    parsed_url = urlparse(url)
+    parsed_initial = urlparse(initial_url)
+
+    if _normalize_domain(parsed_url.netloc) != _normalize_domain(parsed_initial.netloc):
+        return False
+
+    base_path = parsed_initial.path or '/'
+    url_path = parsed_url.path or '/'
+
+    if base_path == '/':
+        return True
+
+    return url_path == base_path or url_path.startswith(base_path.rstrip('/') + '/')
+
+def _get_links_from_page(driver, current_page_url, initial_url, current_depth, max_depth, visited_urls, queued_urls):
+    """
+    Extracts all valid links located under the start URL from the current page.
     """
     links_to_add = []
     if current_depth >= max_depth:
         return []
-
-    normalized_initial_domain = _normalize_domain(initial_domain)
 
     try:
         a_tags = driver.find_elements(By.TAG_NAME, 'a')
@@ -108,7 +124,7 @@ def _get_links_from_page(driver, current_page_url, initial_domain, current_depth
                 if parsed_clean_url.scheme not in ['http', 'https']:
                     continue
 
-                if _normalize_domain(parsed_clean_url.netloc) == normalized_initial_domain:
+                if _is_under_start_url(clean_url, initial_url):
                     if clean_url not in visited_urls and clean_url not in queued_urls:
                         links_to_add.append((clean_url, current_depth + 1))
     except Exception as e:
@@ -267,7 +283,77 @@ def _handle_login(driver, params):
     except Exception as e:
         logging.error(f"An error occurred during login: {e}")
 
-def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit_queue):
+def _dismiss_banner(driver, max_attempts=5, delay_between_attempts=1):
+    """
+    Attempts to dismiss common banners (e.g., cookie consents, pop-ups) that might
+    intercept clicks or obscure content. It tries multiple times if the banner reappears.
+    """
+    logging.info("Attempting to dismiss banners.")
+    
+    banner_xpaths = [
+        "//div[contains(@class, 'modal-overlay')]//span[contains(@class, 'nuxt-icon') and ./*[name()='svg']]", # Specific for the Curie.fr banner
+        "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'close')]",
+        "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'fermer')]", # French for close
+        "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ok')]",
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'close')]",
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'fermer')]",
+        "//a[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ok')]",
+        "//div[contains(@class, 'cookie-notice')]//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//div[contains(@class, 'banner')]//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'close')]",
+        "//button[@aria-label='Close']",
+        "//button[@aria-label='Accept cookies']",
+        "//button[contains(@id, 'cookie') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//button[contains(@class, 'cookie') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//button[contains(@id, 'banner') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'close')]",
+        "//button[contains(@class, 'banner') and contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'close')]",
+    ]
+
+    attempts = 0
+    while attempts < max_attempts:
+        # Check if the body has the 'modal-open' class, indicating a banner is active
+        if "modal-open" not in driver.find_element(By.TAG_NAME, "body").get_attribute("class"):
+            logging.info("No active modal/banner detected.")
+            return True # No banner to dismiss
+
+        logging.info(f"Attempt {attempts + 1} to dismiss banner.")
+        banner_dismissed_in_this_attempt = False
+        for xpath in banner_xpaths:
+            try:
+                # Wait a short period for the banner to appear, but don't fail if it doesn't
+                button = WebDriverWait(driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                if button:
+                    logging.info(f"Found and clicking banner dismissal button with XPath: {xpath}")
+                    driver.execute_script("arguments[0].click();", button)
+                    time.sleep(delay_between_attempts) # Give time for the banner to disappear
+                    banner_dismissed_in_this_attempt = True
+                    break # Break from inner loop, re-check modal-open class
+            except (NoSuchElementException, TimeoutException, ElementClickInterceptedException):
+                continue
+            except Exception as e:
+                logging.warning(f"Error while trying to dismiss banner with XPath {xpath}: {e}")
+        
+        if not banner_dismissed_in_this_attempt:
+            logging.info("No dismissable banner element found in this attempt.")
+            # If no button was found/clicked, and modal-open is still there,
+            # it might be a persistent banner without a clear dismiss button,
+            # or it's not clickable. We should probably stop trying.
+            break 
+        
+        attempts += 1
+        time.sleep(delay_between_attempts) # Wait before next check
+
+    if "modal-open" in driver.find_element(By.TAG_NAME, "body").get_attribute("class"):
+        logging.warning(f"Banner still present after {max_attempts} attempts.")
+        return False
+    else:
+        logging.info("Banner successfully dismissed.")
+        return True
+
+def _handle_pagination(driver, job_id, initial_url, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit_queue):
     """
     Handles pagination at depth 0 before proceeding to deeper levels.
     """
@@ -283,6 +369,7 @@ def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, v
         logging.info(f"Crawling paginated URL: {current_url} (Depth: {current_depth})")
         try:
             driver.get(current_url)
+            _dismiss_banner(driver) # Attempt to dismiss banner on paginated pages
             body_text = driver.find_element(By.TAG_NAME, 'body').text
             text_bytes = body_text.encode('utf-8')
             text_size = len(text_bytes)
@@ -301,7 +388,7 @@ def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, v
             visited_urls.add(current_url)
 
             # Extract links for the next depth from this paginated page
-            new_links = _get_links_from_page(driver, current_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls)
+            new_links = _get_links_from_page(driver, current_url, initial_url, current_depth, max_depth, visited_urls, queued_urls)
             for link, depth in new_links:
                 if link not in queued_urls:
                     urls_to_visit_queue.append((link, depth))
@@ -311,13 +398,12 @@ def _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, v
             next_page_url = _find_next_page_link(driver)
             if next_page_url:
                 clean_next_page_url = _canonicalize_url(urljoin(current_url, next_page_url))
-                parsed_next_url = urlparse(clean_next_page_url)
-                # Ensure the next page is still within the initial domain and not already processed
-                if _normalize_domain(parsed_next_url.netloc) == _normalize_domain(initial_domain) and \
+                # Ensure the next page is still under the start URL and not already processed
+                if _is_under_start_url(clean_next_page_url, initial_url) and \
                    clean_next_page_url not in visited_urls:
                     urls_to_process_at_depth_0.append((clean_next_page_url, 0))
                 else:
-                    logging.info(f"Next page link {clean_next_page_url} is outside initial domain or already processed. Stopping pagination.")
+                    logging.info(f"Next page link {clean_next_page_url} is outside the start URL scope or already processed. Stopping pagination.")
             else:
                 logging.info("No more next page links found for pagination.")
 
@@ -357,16 +443,16 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     visited_urls = set()
     urls_to_visit = deque() # This queue will hold links for depth > 0, or all links if not pagination mode
     queued_urls = {initial_url} # Tracks all URLs that are either visited or in any queue
-    initial_domain = urlparse(initial_url).netloc
 
     try:
         driver, service = _setup_driver(job_download_dir)
         driver.get(initial_url)
         _handle_login(driver, params)
+        _dismiss_banner(driver) # Attempt to dismiss any banners after initial load and login
 
         if more_content_button_text == "Pagination":
             # Handle all paginated pages at depth 0 first
-            _handle_pagination(driver, job_id, initial_url, initial_domain, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit)
+            _handle_pagination(driver, job_id, initial_url, max_depth, visited_urls, queued_urls, crawled_data, urls_to_visit)
         else:
             # If not pagination, start with the initial URL at depth 0
             urls_to_visit.append((initial_url, 0))
@@ -384,6 +470,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
             try:
                 driver.get(current_url)
+                _dismiss_banner(driver) # Attempt to dismiss banner on subsequent pages
                 # Only click "more content" button if not in pagination mode
                 if more_content_button_text != "Pagination":
                     _click_more_button(driver, more_content_button_text)
@@ -408,7 +495,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 })
                 visited_urls.add(current_url)
 
-                new_links = _get_links_from_page(driver, current_url, initial_domain, current_depth, max_depth, visited_urls, queued_urls)
+                new_links = _get_links_from_page(driver, current_url, initial_url, current_depth, max_depth, visited_urls, queued_urls)
                 for link, depth in new_links:
                     if link not in queued_urls:
                         urls_to_visit.append((link, depth))
