@@ -58,6 +58,18 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         time.sleep(2) # Add a delay after handling overlays
 
         _wait_for_viewer(driver)
+        
+        # Introduce dynamic wait based on number of pages
+        total_slides = _get_total_slides_count(driver)
+        if total_slides > 0:
+            # Wait 0.5 seconds per slide, with a minimum of 5 seconds
+            dynamic_wait_time = max(5, total_slides * 0.5)
+            logging.info(f"Detected {total_slides} slides. Waiting for {dynamic_wait_time:.1f} seconds for document to fully render.")
+            time.sleep(dynamic_wait_time)
+        else:
+            logging.info("Could not determine total slides. Waiting for a default of 5 seconds for document to render.")
+            time.sleep(5)
+
 
         # Capture every page of the document by navigating from slide to slide
         captured_slides = _capture_all_slides(driver)
@@ -218,7 +230,7 @@ def _capture_all_slides(driver):
     # image is already part of the DOM. In that case all pages can be downloaded directly.
     slides = _capture_all_page_images(driver, total_slides)
     if slides:
-        logging.info(f"Finished capturing slides. Total: {len(slides)}")
+        logging.info(f"All {len(slides)} page images are available in the viewer. Downloading them directly.")
         return slides
 
     logging.info(f"\nStarting capture of {total_slides} slides...")
@@ -244,20 +256,20 @@ def _capture_all_slides(driver):
 def _capture_all_page_images(driver, total_slides):
     """
     Tries to download every page image directly from the DOM (vertical viewer layout).
+
+    Page images are lazily loaded, so every page element is scrolled into view and
+    its real source URL is awaited before downloading it. This avoids ending up with
+    placeholder (blank/black) images for the pages that were never displayed.
     Returns a list of PIL Images, or an empty list when the layout does not expose all pages.
     """
-    image_urls = _collect_page_image_urls(driver)
-    if len(image_urls) < total_slides:
-        _scroll_viewer_to_load_all_pages(driver)
-        image_urls = _collect_page_image_urls(driver)
-
-    if not image_urls or len(image_urls) < total_slides:
+    page_count = _count_page_image_elements(driver)
+    if not page_count or page_count < total_slides:
         return []
 
-    logging.info(f"All {len(image_urls)} page images are available in the viewer. Downloading them directly...")
+    logging.info(f"All {page_count} page elements are available in the viewer. Downloading them directly...")
     slides = []
-    for page_number, image_url in enumerate(image_urls[:total_slides], start=1):
-        image = _download_image(driver, image_url)
+    for page_number in range(1, total_slides + 1):
+        image = _capture_page_image_by_index(driver, page_number)
         if image is None:
             logging.warning(f"Could not download page image {page_number}. Falling back to slide navigation.")
             return []
@@ -266,17 +278,63 @@ def _capture_all_page_images(driver, total_slides):
     return slides
 
 
-def _collect_page_image_urls(driver):
-    """Returns the source URLs of all loaded page images, in document order."""
+def _capture_page_image_by_index(driver, page_number):
+    """Scrolls the given page (1-based) into view, waits for it to load and downloads it."""
+    for attempt in range(3):
+        image_url = _wait_for_page_image_url(driver, page_number - 1)
+        if not image_url:
+            continue
+
+        image = _download_image(driver, image_url)
+        if image is None:
+            continue
+        if _is_blank_image(image):
+            logging.warning(f"Page image {page_number} looks blank (attempt {attempt + 1}). Retrying.")
+            time.sleep(1)
+            continue
+        return image
+    return None
+
+
+def _wait_for_page_image_url(driver, index, timeout=30):
+    """
+    Scrolls the page element at `index` into view and waits until it exposes a real,
+    fully loaded image source. Returns the URL or None.
+    """
+    def _loaded_url(drv):
+        return drv.execute_script(
+            "var imgs = document.querySelectorAll('img.page-view');"
+            "var img = imgs[arguments[0]];"
+            "if (!img) { return null; }"
+            "img.scrollIntoView({behavior: 'instant', block: 'center'});"
+            "if (!img.complete || !img.naturalWidth) { return null; }"
+            "var src = img.currentSrc || img.src || img.getAttribute('data-src');"
+            "if (!src || src.indexOf('data:') === 0) { return null; }"
+            "return src;",
+            index
+        ) or False
+
     try:
-        return driver.execute_script(
-            "return Array.from(document.querySelectorAll('img.page-view'))"
-            "  .filter(function (img) { return img.complete && img.naturalWidth > 0; })"
-            "  .map(function (img) { return img.currentSrc || img.src; })"
-            "  .filter(function (src) { return !!src; });"
-        ) or []
+        return WebDriverWait(driver, timeout, poll_frequency=0.5).until(_loaded_url)
     except Exception:
-        return []
+        return None
+
+
+def _count_page_image_elements(driver):
+    """Returns the number of page image elements present in the DOM."""
+    try:
+        return driver.execute_script("return document.querySelectorAll('img.page-view').length;") or 0
+    except Exception:
+        return 0
+
+
+def _is_blank_image(image):
+    """Returns True when the image contains a single uniform color (blank or fully black page)."""
+    try:
+        extrema = image.convert('RGB').getextrema()
+        return all(channel_min == channel_max for channel_min, channel_max in extrema)
+    except Exception:
+        return False
 
 
 def _scroll_viewer_to_load_all_pages(driver):
@@ -325,6 +383,9 @@ def _get_active_page_image_element(driver, timeout=30):
                     "return arguments[0].complete && arguments[0].naturalWidth > 0;", element
                 )
                 if is_loaded:
+                    # Scroll the element into view to ensure it's fully rendered
+                    drv.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", element)
+                    time.sleep(0.5) # Give a moment for the scroll to take effect and rendering to update
                     return element
             except StaleElementReferenceException:
                 continue
@@ -341,20 +402,36 @@ def _capture_current_slide(driver, page_number):
     """
     try:
         image_element = _get_active_page_image_element(driver)
+        time.sleep(3) # Increased delay to 3 seconds
     except TimeoutException:
         logging.warning(f"Slide {page_number} image did not load in time.")
         return None
 
     image_url = image_element.get_attribute('src')
     image = _download_image(driver, image_url)
-    if image is not None:
+    if image is not None and not _is_blank_image(image):
         return image
+    if image is not None:
+        logging.warning(f"Slide {page_number} image looks blank, falling back to a screenshot.")
 
     try:
-        return Image.open(BytesIO(image_element.screenshot_as_png)).convert('RGB')
+        return _to_rgb_on_white(Image.open(BytesIO(image_element.screenshot_as_png)))
     except Exception as e:
         logging.warning(f"Could not screenshot slide {page_number}: {e}")
         return None
+
+
+def _to_rgb_on_white(image):
+    """
+    Converts an image to RGB, flattening any transparency onto a white background.
+    A plain `convert('RGB')` turns transparent pixels black, which produced black pages.
+    """
+    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+        rgba = image.convert('RGBA')
+        background = Image.new('RGB', rgba.size, (255, 255, 255))
+        background.paste(rgba, mask=rgba.split()[-1])
+        return background
+    return image.convert('RGB')
 
 
 def _download_image(driver, image_url):
@@ -371,7 +448,7 @@ def _download_image(driver, image_url):
         }
         response = session.get(image_url, headers=headers, timeout=60)
         response.raise_for_status()
-        return Image.open(BytesIO(response.content)).convert('RGB')
+        return _to_rgb_on_white(Image.open(BytesIO(response.content)))
     except Exception as e:
         logging.warning(f"Could not download page image, falling back to screenshot: {e}")
         return None
@@ -396,7 +473,7 @@ def _go_to_next_slide(driver, current_page_number):
             WebDriverWait(driver, 10).until(
                 lambda drv: _get_active_slide_index(drv) not in (previous_index, -1)
             )
-            time.sleep(0.5) # Let the new slide settle before capturing it
+            time.sleep(2) # Let the new slide settle before capturing it (increased from 0.5)
             return True
         except TimeoutException:
             logging.warning(f"The active slide did not change after slide {current_page_number}.")
