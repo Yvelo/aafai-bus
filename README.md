@@ -291,6 +291,23 @@ Downloads a document from a DocSend link, handling optional passcodes.
 }
 ```
 
+### `papermark_scraping`
+
+Downloads a document from a Papermark link (`https://www.papermark.com/view/...`), handling the email gate and optional passcodes. Every page of the viewer is captured and compiled into a single PDF, exactly like `docsend_scraping`.
+
+**Input JSON Format:**
+```json
+{
+  "action": "papermark_scraping",
+  "params": {
+    "url": "string",
+    "user_email": "string",
+    "document_name": "string",
+    "passcode": "string (optional)"
+  }
+}
+```
+
 ### `drooms_scraping`
 
 Scrapes detailed information from a Droom.org profile page.
