@@ -86,6 +86,7 @@ These tests verify that different parts of the system work together correctly. A
 - **Espacenet Patent Search (`search_espacenet`):** An action that performs advanced searches on the Espacenet patent database. It scrapes patent details including title, link, publication date, applicant, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped.
 - **DocSend Downloader (`docsend_download`):** An action to download documents from DocSend links, handling passcodes if required.
 - **Droom Scraper (`scrape_droom`):** An action to scrape detailed information from Droom.org profile pages.
+- **Screen Recording to PDF (`screen_recording_to_pdf`):** Downloads the screen recording (e.g. `.wmv`) of a presentation or document browsed through on screen and reconstructs the browsed pages as a PDF. Scrolled viewers are stitched frame by frame and split into pages on the viewer's page gaps; slide shows keep each displayed slide once, ignoring transitions.
 - **Message Management (`clear_all_messages`, `get_all_messages`):** Provides actions to clear all message queues or retrieve all messages for administrative purposes.
 
 ## 6. Setup & Deployment
@@ -345,6 +346,31 @@ Retrieves a list of all messages currently in the inbound, consumed, and failed 
   "params": {}
 }
 ```
+
+### `screen_recording_to_pdf`
+
+Reconstructs a PDF from the screen recording of a presentation or document that has been browsed through (e.g. a `.wmv` file produced by a screen recorder). The video is decoded with OpenCV, no external binary is required.
+
+**Input JSON Format:**
+```json
+{
+  "action": "screen_recording_to_pdf",
+  "params": {
+    "url": "string",
+    "document_name": "string (optional, defaults to the name of the video file)",
+    "page_height": "integer (optional)"
+  }
+}
+```
+- **`url`**: An `http(s)` link to the recording. Google Drive and Dropbox share links are converted to direct download links (the file must be shared publicly), and the Google Drive "download anyway" page of large files is confirmed automatically.
+- **`page_height`**: Forces the height, in video pixels, of the pages of a scrolled document when the viewer draws no visible gap between pages.
+
+How the pages are reconstructed:
+- **Scrolling viewers** (PDF readers, DocSend / Papermark vertical viewers...): the static window chrome is cropped, every frame is registered against the part of the document already seen and the frames are stitched into one tall image, preferring for each row the frames the viewer rested on. The image is split into pages on the gaps drawn between the pages (the rows of the viewer background colour repeating with the page height).
+- **Slide shows**: when the displayed content changes and settles, it becomes a new page; transitions are ignored and slides shown again are not duplicated.
+- Only what has been displayed can be reconstructed: a page never shown entirely in the recording is partial. The mouse pointer may remain visible.
+
+The result has the same format as `docsend_scraping`, with an additional `page_count`.
 
 ## 10. Google Apps Script Integration
 
