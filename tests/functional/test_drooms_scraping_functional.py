@@ -34,9 +34,9 @@ def test_drooms_scraping_live():
     # --- Test Configuration ---
     # IMPORTANT: In a real-world project, these credentials should not be hardcoded.
     # They should be loaded from environment variables or a secure vault.
-    DROOMS_URL = os.environ.get('DROOMS_URL')
-    DROOMS_USERNAME = os.environ.get('DROOMS_USERNAME')
-    DROOMS_PASSWORD = os.environ.get('DROOMS_PASSWORD')
+    DROOMS_URL = os.environ.get('DROOMS_URL','https://wm0skin9pxcl1neaoqut75.veladrop.app/ylm')
+    DROOMS_USERNAME = os.environ.get('DROOMS_USERNAME','yvesloicmartin@aaf.lu')
+    DROOMS_PASSWORD = os.environ.get('DROOMS_PASSWORD','none')
 
     # Use C:/temp as the base for test outputs to avoid long path issues
     base_path = 'C:/temp'

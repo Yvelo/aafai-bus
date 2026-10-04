@@ -138,9 +138,9 @@ class TestPapermarkScrapingFunctional:
         It will access a Papermark link, enter an email, and scrape the document.
         """
         # --- Test Configuration ---
-        PAPERMARK_URL = os.environ.get('PAPERMARK_URL', 'https://www.papermark.com/view/cmtujk5820001jy041ql4mv92')
+        PAPERMARK_URL = os.environ.get('PAPERMARK_URL', 'https://wm0skin9pxcl1neaoqut75.veladrop.app/ylm')
         USER_EMAIL = os.environ.get('USER_EMAIL', 'yvesloicmartin@aaf.lu')
-        DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20260913 2NAFISH Pitch Deck')
+        DOCUMENT_NAME = os.environ.get('DOCUMENT_NAME', '20260920 Vela Pitch Deck')
         EXPECTED_MIN_PAGES = int(os.environ.get('EXPECTED_MIN_PAGES', '13'))
 
         # --- Action Parameters ---

@@ -267,43 +267,56 @@ def test_action_through_the_server_queue(client, app, recordings_server):
 @pytest.mark.slow
 def test_live_screen_recording(tmp_path):
     """
-    Reconstructs a real screen recording served over HTTP.
-    RECORDING_PATH: the .wmv file; EXPECTED_MIN_PAGES: the number of pages browsed through.
+    Reconstructs real screen recordings served over HTTP.
+    RECORDING_PATH: either a .wmv file or a folder containing .wmv files (each one is turned into a
+    PDF carrying the same name, with .wmv replaced by .pdf); EXPECTED_MIN_PAGES: the number of pages
+    browsed through.
     """
-    recording_path = os.environ.get('RECORDING_PATH', '')
-    if not os.path.isfile(recording_path):
-        pytest.skip("Set RECORDING_PATH to a screen recording to run this test.")
+    recording_path = os.environ.get('RECORDING_PATH', 'C:/Users/yvesl/Downloads')
+    if os.path.isdir(recording_path):
+        directory = os.path.abspath(recording_path)
+        recordings = sorted(name for name in os.listdir(directory) if name.lower().endswith('.wmv'))
+        if not recordings:
+            pytest.skip(f"No .wmv recording found in {directory}.")
+    elif os.path.isfile(recording_path):
+        directory = os.path.dirname(os.path.abspath(recording_path))
+        recordings = [os.path.basename(recording_path)]
+    else:
+        pytest.skip("Set RECORDING_PATH to a screen recording or to a folder of screen recordings.")
     expected_min_pages = int(os.environ.get('EXPECTED_MIN_PAGES', '1'))
     kept_output_dir = os.environ.get('KEPT_OUTPUT_DIR', 'C:/temp/screen_recording_test_output')
 
-    directory = os.path.dirname(os.path.abspath(recording_path))
     httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(_QuietHandler, directory=directory))
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
+    results = {}
     try:
-        url = f"http://127.0.0.1:{httpd.server_address[1]}/{quote(os.path.basename(recording_path))}"
-        results = {}
-        started = time.time()
-        screen_recording_to_pdf.execute(str(uuid.uuid4()), {'url': url}, str(tmp_path),
-                                        lambda job_id, result: results.update({'result': result}))
-        print(f"Reconstruction took {time.time() - started:.1f}s")
+        for recording in recordings:
+            url = f"http://127.0.0.1:{httpd.server_address[1]}/{quote(recording)}"
+            document_name = os.path.splitext(recording)[0]
+            started = time.time()
+            screen_recording_to_pdf.execute(
+                str(uuid.uuid4()), {'url': url, 'document_name': document_name}, str(tmp_path),
+                functools.partial(lambda name, job_id, result: results.update({name: result}), recording))
+            print(f"Reconstruction of {recording} took {time.time() - started:.1f}s")
     finally:
         httpd.shutdown()
         httpd.server_close()
         thread.join()
 
-    result = results['result']
-    printable = copy.deepcopy(result)
-    for file_info in printable.get('result', {}).get('downloaded_files', []):
-        file_info.pop('content_base64', None)
-    print(json.dumps(printable, indent=2))
-
-    assert result['status'] == 'Completed', result.get('error')
-    downloaded = result['result']['downloaded_files'][0]
-    assert result['result']['page_count'] >= expected_min_pages
-    assert _pdf_page_count(base64.b64decode(downloaded['content_base64'])) == result['result']['page_count']
-
     os.makedirs(kept_output_dir, exist_ok=True)
-    kept_path = os.path.join(kept_output_dir, downloaded['filename'])
-    shutil.copy2(downloaded['path'], kept_path)
-    print(f"Kept a copy of the reconstructed document at: {kept_path}")
+    for recording in recordings:
+        result = results[recording]
+        printable = copy.deepcopy(result)
+        for file_info in printable.get('result', {}).get('downloaded_files', []):
+            file_info.pop('content_base64', None)
+        print(json.dumps(printable, indent=2))
+
+        assert result['status'] == 'Completed', result.get('error')
+        downloaded = result['result']['downloaded_files'][0]
+        assert result['result']['page_count'] >= expected_min_pages
+        assert _pdf_page_count(base64.b64decode(downloaded['content_base64'])) == result['result']['page_count']
+
+        kept_path = os.path.join(kept_output_dir, f"{os.path.splitext(recording)[0]}.pdf")
+        shutil.copy2(downloaded['path'], kept_path)
+        print(f"Kept a copy of the reconstructed document at: {kept_path}")
