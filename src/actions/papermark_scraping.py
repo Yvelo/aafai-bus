@@ -25,7 +25,12 @@ from PIL import Image
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
-from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
+from selenium.common.exceptions import (
+    TimeoutException,
+    ElementClickInterceptedException,
+    StaleElementReferenceException,
+    NoSuchElementException,
+)
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 
@@ -259,17 +264,20 @@ def _wait_for_page_image_url(driver, index, timeout=30):
     Placeholder images (`blank.gif`, data URLs) are ignored. Returns the URL or None.
     """
     def _loaded_url(drv):
-        return drv.execute_script(
-            "var imgs = document.querySelectorAll(arguments[0]);"
-            "var img = imgs[arguments[1]];"
-            "if (!img) { return null; }"
-            "if (!img.complete || img.naturalWidth <= 1) { return null; }"
-            "var src = img.currentSrc || img.src || img.getAttribute('data-src');"
-            "if (!src || src.indexOf('data:') === 0 || src.indexOf('blank.gif') !== -1) { return null; }"
-            "return src;",
-            PAGE_IMAGE_SELECTOR,
-            index
-        ) or False
+        try:
+            return drv.execute_script(
+                "var imgs = document.querySelectorAll(arguments[0]);"
+                "var img = imgs[arguments[1]];"
+                "if (!img) { return null; }"
+                "if (!img.complete || img.naturalWidth <= 1) { return null; }"
+                "var src = img.currentSrc || img.src || img.getAttribute('data-src');"
+                "if (!src || src.indexOf('data:') === 0 || src.indexOf('blank.gif') !== -1) { return null; }"
+                "return src;",
+                PAGE_IMAGE_SELECTOR,
+                index
+            ) or False
+        except StaleElementReferenceException:
+            return False
 
     try:
         return WebDriverWait(driver, timeout, poll_frequency=0.5).until(_loaded_url)
@@ -320,11 +328,21 @@ def _send_arrow_right(driver):
 
 
 def _click_next_button(driver):
-    """Performs a real mouse click on the viewer's next page control."""
-    next_button = driver.find_element(
-        By.CSS_SELECTOR, "button[aria-label*='next' i], button#nextPageButton"
-    )
-    ActionChains(driver).move_to_element(next_button).click().perform()
+    """Performs a real mouse click on the viewer's next page control, resilient to DOM re-renders."""
+    for _ in range(3):
+        try:
+            next_button = driver.find_element(
+                By.CSS_SELECTOR, "button[aria-label*='next' i], button#nextPageButton"
+            )
+            ActionChains(driver).move_to_element(next_button).click().perform()
+            return
+        except StaleElementReferenceException:
+            time.sleep(0.3)
+        except NoSuchElementException:
+            return
+        except Exception as e:
+            logging.warning(f"Could not click next button: {e}")
+            return
 
 
 def _get_current_page_number(driver):
@@ -340,11 +358,17 @@ def _get_current_page_number(driver):
 
 
 def _screenshot_page(driver, page_number):
-    """Fallback capture: screenshots the rendered page element."""
-    try:
-        elements = driver.find_elements(By.CSS_SELECTOR, PAGE_IMAGE_SELECTOR)
-        element = elements[page_number - 1]
-        return _to_rgb_on_white(Image.open(BytesIO(element.screenshot_as_png)))
-    except Exception as e:
-        logging.warning(f"Could not screenshot page {page_number}: {e}")
-        return None
+    """Fallback capture: screenshots the rendered page element, with retry on stale element."""
+    for _ in range(3):
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, PAGE_IMAGE_SELECTOR)
+            if page_number - 1 >= len(elements):
+                return None
+            element = elements[page_number - 1]
+            return _to_rgb_on_white(Image.open(BytesIO(element.screenshot_as_png)))
+        except StaleElementReferenceException:
+            time.sleep(0.5)
+        except Exception as e:
+            logging.warning(f"Could not screenshot page {page_number}: {e}")
+            return None
+    return None
