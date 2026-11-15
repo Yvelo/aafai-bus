@@ -1,13 +1,30 @@
 import logging
 import os
 import shutil
-from selenium import webdriver
+import sys
+from unittest.mock import MagicMock
+from src.browser_config import get_headless_status
+
+# BEGIN: Monkey patch for distutils
+# This is required for undetected-chromedriver to work with Python 3.12+
+if sys.version_info >= (3, 12):
+    try:
+        import packaging.version
+
+        def loose_version_factory(vstring):
+            v = packaging.version.Version(vstring)
+            v.version = v.release
+            v.vstring = vstring
+            return v
+
+        sys.modules['distutils.version'] = MagicMock()
+        sys.modules['distutils.version'].LooseVersion = loose_version_factory
+    except ImportError:
+        logging.warning("Could not apply distutils monkey patch: 'packaging' module not found.")
+# END: Monkey patch for distutils
+
+from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from src.browser_config import get_chrome_options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.driver_cache import DriverCacheManager
 import tempfile
 from urllib.parse import urlencode, urljoin
 from selenium.webdriver.support.ui import WebDriverWait
@@ -26,46 +43,121 @@ DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
 
 
 def _setup_driver(job_download_dir, download_dir):
-    """Configures and returns a headless Chrome WebDriver instance."""
-    chrome_options = get_chrome_options()
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-crash-reporter")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-in-process-stack-traces")
-    chrome_options.add_argument("--disable-logging")
-    chrome_options.add_argument("--disable-dev-tools")
-    chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-    chrome_options.add_argument("--window-size=1920,1080")
-
-    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-
+    """Configures and returns a Chrome WebDriver instance using undetected-chromedriver."""
     temp_dir = tempfile.mkdtemp()
     os.environ['HOME'] = temp_dir
 
-    user_data_dir = os.path.join(temp_dir, "user-data")
-    disk_cache_dir = os.path.join(temp_dir, "cache")
-    crash_dumps_dir = os.path.join(temp_dir, "crash-dumps")
+    import undetected_chromedriver as uc
 
-    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-    chrome_options.add_argument(f"--disk-cache-dir={disk_cache_dir}")
-    chrome_options.add_argument(f"--crash-dumps-dir={crash_dumps_dir}")
+    options = uc.ChromeOptions()
+    is_headless = get_headless_status()
 
-    # Use a persistent cache for WebDriver Manager in a well-known location
-    persistent_cache_dir = os.path.join(os.path.expanduser("~"), ".aafai-bus-cache", "drivers")
-    os.makedirs(persistent_cache_dir, exist_ok=True)
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36')
+    options.add_argument('--profile-directory=Default')
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--lang=en-US")
 
-    chromedriver_log_path = os.path.join(job_download_dir, "chromedriver.log")
-    service = Service(ChromeDriverManager(cache_manager=DriverCacheManager(root_dir=persistent_cache_dir)).install(), service_args=['--verbose', f'--log-path={chromedriver_log_path}'])
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-crash-reporter")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-in-process-stack-traces")
+    options.add_argument("--disable-logging")
+    options.add_argument("--disable-dev-tools")
+    options.add_argument("--log-level=3")
+    options.add_argument("--window-size=1920, 1080")
 
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        # First attempt: let undetected-chromedriver auto-detect the installed Chrome version
+        driver = uc.Chrome(
+            options=options,
+            headless=is_headless
+        )
+    except Exception as e:
+        # Fallback: if auto-detection failed due to version mismatch, parse the browser version from error if possible
+        version_match = re.search(r'Current browser version is (\d+)', str(e))
+        if version_match:
+            detected_version = int(version_match.group(1))
+            logging.info(f"Retrying undetected_chromedriver with detected Chrome version {detected_version}")
+            driver = uc.Chrome(
+                options=options,
+                headless=is_headless,
+                version_main=detected_version
+            )
+        else:
+            raise
+
+    if is_headless:
+        stealth(
+            driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
+
     driver.set_page_load_timeout(60)
     driver.temp_dir = temp_dir
     return driver
+
+
+def _handle_security_check(driver, timeout=90):
+    """
+    Checks if an AWS WAF CAPTCHA / bot challenge page is displayed.
+    Automatically clicks 'Begin' (#amzn-captcha-verify-button) if present to open the interactive puzzle.
+    In non-headless mode, waits for the user to complete the puzzle until the page redirects back.
+    In headless mode, raises an exception.
+    """
+    bot_indicators = [
+        "Complete the security check before continuing",
+        "verifies that you are not a bot",
+        "confirm you are human",
+        "verify you are human",
+        "captcha-container",
+        "amzn-captcha",
+        "AwsWafIntegration",
+    ]
+    try:
+        page_source = driver.page_source or ""
+        if any(ind.lower() in page_source.lower() for ind in bot_indicators):
+            logging.warning("AWS WAF CAPTCHA / security check detected on Semantic Scholar.")
+
+            # Attempt to click the 'Begin' button if it's there to display the puzzle
+            try:
+                begin_button = driver.find_element(By.ID, "amzn-captcha-verify-button")
+                if begin_button.is_displayed():
+                    logging.info("Found 'Begin' button for AWS WAF CAPTCHA. Clicking it to reveal puzzle...")
+                    driver.execute_script("arguments[0].click();", begin_button)
+                    time.sleep(2)
+            except NoSuchElementException:
+                pass
+            except Exception as e:
+                logging.debug(f"Could not click 'Begin' button: {e}")
+
+            if not get_headless_status():
+                logging.info(f"Running in non-headless mode: waiting up to {timeout}s for CAPTCHA to be solved...")
+                # Wait until none of the bot challenge indicators remain in page source or container is gone
+                WebDriverWait(driver, timeout, poll_frequency=2).until_not(
+                    lambda d: ("captcha-container" in (d.page_source or "") or
+                               "confirm you are human" in (d.page_source or "").lower() or
+                               "verifies that you are not a bot" in (d.page_source or "").lower())
+                )
+                logging.info("CAPTCHA / Security check resolved successfully.")
+                time.sleep(3)
+            else:
+                raise RuntimeError("Semantic Scholar blocked the request with AWS WAF CAPTCHA (headless mode).")
+    except TimeoutException:
+        raise RuntimeError(f"Timed out waiting {timeout}s for AWS WAF CAPTCHA to be resolved.")
+    except Exception as e:
+        if "blocked the request" in str(e) or "Timed out waiting" in str(e):
+            raise
+        logging.warning(f"Error checking for security popup: {e}")
 
 
 def _build_semantic_scholar_url(query_params):
@@ -309,15 +401,21 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         except TimeoutException:
             logging.warning("Initial page load timed out. The page might be partially loaded.")
 
+        # Check for bot challenge / security verification
+        _handle_security_check(driver)
+
         # Handle cookie banner if it appears
         try:
-            wait = WebDriverWait(driver, 15)
+            wait = WebDriverWait(driver, 5)
             cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-test-id="cookie-banner__dismiss-btn"]')))
             logging.info("Cookie banner found. Clicking 'ACCEPT & CONTINUE'.")
             cookie_button.click()
-            time.sleep(15)  # Give a moment for the banner to disappear
+            time.sleep(2)  # Give a moment for the banner to disappear
         except TimeoutException:
             logging.info("Cookie banner not found or not clickable within the timeout period.")
+
+        # Re-check in case security check pops up after cookie banner dismissal
+        _handle_security_check(driver)
 
         while len(all_results) < max_articles:
             if page == 1:
@@ -382,6 +480,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 next_button.click()
                 page += 1
                 time.sleep(5)
+                _handle_security_check(driver)
             except (NoSuchElementException, ElementClickInterceptedException):
                 logging.info("No next page button found or it was not clickable. Ending pagination.")
                 break
