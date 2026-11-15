@@ -14,7 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
 import re
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException, ElementClickInterceptedException
 from selenium.webdriver.common.action_chains import ActionChains
 
 # Base URL for USPTO
@@ -125,22 +125,57 @@ def _parse_single_patent(patent_element):
 
 
 def _handle_initial_popups(driver):
-    """Handles cookie disclaimers and other initial pop-ups."""
+    """Handles cookie disclaimers, modal dialogs, and other initial pop-ups."""
+    # 1. Cookie disclaimer
     try:
-        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button"))).click()
+        cookie_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "cookie-disclaimer-button")))
+        cookie_btn.click()
         logging.info("Dismissed cookie disclaimer.")
     except TimeoutException:
         logging.info("No cookie disclaimer found or could not be closed.")
-    
+
+    # 2. Bootstrap/generic modal dialogs (e.g. .modal-dialog, .modal)
+    modal_close_selectors = [
+        "//div[contains(@class, 'modal')]//button[contains(@class, 'close')]",
+        "//div[contains(@class, 'modal-dialog')]//button[contains(@class, 'btn-primary') or contains(@class, 'btn-secondary') or contains(@class, 'close')]",
+        "//div[contains(@class, 'modal')]//button[contains(translate(text(), 'OKCLOSE', 'okclose'), 'ok') or contains(translate(text(), 'OKCLOSE', 'okclose'), 'close') or contains(translate(text(), 'OKCLOSE', 'okclose'), 'dismiss') or contains(translate(text(), 'OKCLOSE', 'okclose'), 'accept') or contains(translate(text(), 'OKCLOSE', 'okclose'), 'continue')]",
+        "//button[contains(@aria-label, 'close') or contains(@aria-label, 'Close')]",
+    ]
+
+    for selector in modal_close_selectors:
+        try:
+            buttons = driver.find_elements(By.XPATH, selector)
+            for btn in buttons:
+                if btn.is_displayed():
+                    try:
+                        btn.click()
+                        logging.info(f"Closed modal/pop-up via selector: {selector}")
+                        time.sleep(0.5)
+                    except Exception:
+                        driver.execute_script("arguments[0].click();", btn)
+                        logging.info(f"Closed modal/pop-up via JS click: {selector}")
+                        time.sleep(0.5)
+        except Exception as e:
+            logging.debug(f"Error checking modal selector {selector}: {e}")
+
+    # 3. Wait for any open modal-backdrop or modal to disappear
     try:
-        # Use a more generic XPath to find close buttons on pop-up banners
-        close_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(@aria-label, 'close') or contains(@aria-label, 'Close')]"))
+        WebDriverWait(driver, 3).until(
+            EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop, .modal.show, .modal-dialog"))
         )
-        close_button.click()
-        logging.info("Closed a pop-up banner.")
     except TimeoutException:
-        logging.info("No generic pop-up banner found or it was not clickable.")
+        # If modal is still present, attempt hiding it via JS
+        try:
+            driver.execute_script("""
+                document.querySelectorAll('.modal, .modal-backdrop, .modal-dialog').forEach(el => {
+                    el.style.display = 'none';
+                    el.classList.remove('show');
+                });
+                document.body.classList.remove('modal-open');
+            """)
+            logging.info("Forced removal of modal / backdrop via JavaScript.")
+        except Exception:
+            pass
 
 
 def execute(job_id, params, download_dir, write_result_to_outbound):
@@ -197,6 +232,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
             total_patents_found = 0
             try:
+                _handle_initial_popups(driver)
                 search_input = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "trix-editor")))
                 actions = ActionChains(driver)
                 actions.click(search_input).perform()
@@ -205,7 +241,12 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 search_input.send_keys(query)
                 time.sleep(1)
                 search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "search-btn-search")))
-                search_button.click()
+                try:
+                    search_button.click()
+                except ElementClickInterceptedException:
+                    logging.warning("search_button.click() intercepted; attempting popup cleanup and JS click fallback.")
+                    _handle_initial_popups(driver)
+                    driver.execute_script("arguments[0].click();", search_button)
                 logging.info("Search submitted.")
                 
                 # Wait for the result bar to appear, which indicates the search is complete
@@ -317,85 +358,33 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 search_input.send_keys(patent_number)
                 time.sleep(1)
                 search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "search-btn-search")))
-                search_button.click()
+                try:
+                    search_button.click()
+                except ElementClickInterceptedException:
+                    logging.warning("search_button.click() intercepted during abstract search; attempting fallback.")
+                    _handle_initial_popups(driver)
+                    driver.execute_script("arguments[0].click();", search_button)
 
                 # Handle pop-ups that might appear after a search
                 _handle_initial_popups(driver)
 
                 abstract_container = WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div.abstractNode div.abstract")))
-                paragraphs = abstract_container.find_elements(By.TAG_NAME, 'p')
-                abstract_text = "\n".join([p.text for p in paragraphs if p.text])
-                
+                abstract_text = abstract_container.text.strip()
                 if abstract_text:
                     all_patents[patent_number]['abstract'] = abstract_text
-                    logging.info(f"Successfully extracted abstract for {patent_number}")
                 else:
                     all_patents[patent_number]['abstract'] = "Abstract section was empty."
-                    logging.warning(f"Abstract section was empty for {patent_number}")
 
-                # Update other fields from the detail page, as they are more reliable here.
-                details_container = driver.find_element(By.CSS_SELECTOR, "div.docMetadata")
+            except (TimeoutException, NoSuchElementException) as e:
+                logging.warning(f"Could not fetch abstract for {patent_number}: {e}")
+                all_patents[patent_number]['abstract'] = "Error fetching abstract."
 
-                # Inventor(s)
+                # --- Enhanced Debugging: Save screenshot and page source ---
                 try:
-                    inventor_elements = details_container.find_elements(By.CSS_SELECTOR, "div.meta-inventorsInfoGroup .meta-col:nth-child(1) > div")
-                    inventors = [elem.text.strip() for elem in inventor_elements if elem.text.strip()]
-                    if inventors:
-                        all_patents[patent_number]['inventor'] = "; ".join(inventors)
-                except (NoSuchElementException, StaleElementReferenceException):
-                    pass
-
-                # Assignee & Applicant Name
-                try:
-                    # Applicant name is consistently available
-                    applicant_element = details_container.find_element(By.CSS_SELECTOR, "div.meta-applicantInfoGroup .clearfix .item:nth-child(1) .meta-col")
-                    if applicant_element and applicant_element.text.strip():
-                        applicant_name = applicant_element.text.strip()
-                        all_patents[patent_number]['applicant_name'] = applicant_name
-                        
-                        # Check if this applicant is also the assignee
-                        try:
-                            type_element = details_container.find_element(By.CSS_SELECTOR, "div.meta-applicantInfoGroup .item-margin-top .meta-col")
-                            if 'assignee' in type_element.text.lower():
-                                all_patents[patent_number]['assignee'] = applicant_name
-                        except (NoSuchElementException, StaleElementReferenceException):
-                            pass # No type info, can't confirm assignee
-                except (NoSuchElementException, StaleElementReferenceException):
-                    pass
-                
-                # Try to find a dedicated assignee field, which would be more accurate
-                try:
-                    assignee_element = details_container.find_element(By.CSS_SELECTOR, "div.meta-assigneeInfoGroup .clearfix .item:nth-child(1) .meta-col div")
-                    if assignee_element and assignee_element.text.strip():
-                        all_patents[patent_number]['assignee'] = assignee_element.text.strip()
-                except (NoSuchElementException, StaleElementReferenceException):
-                    pass # No dedicated assignee group, rely on applicant info if available
-
-                # Filing Date
-                try:
-                    filing_date_element = details_container.find_element(By.XPATH, ".//h3[contains(., 'Date Filed')]/following-sibling::div")
-                    if filing_date_element and filing_date_element.text.strip():
-                        all_patents[patent_number]['filing_date'] = filing_date_element.text.strip()
-                except (NoSuchElementException, StaleElementReferenceException):
-                    pass
-
-                # Application Number
-                try:
-                    app_num_element = details_container.find_element(By.XPATH, ".//h3[contains(., 'Application NO')]/following-sibling::div")
-                    if app_num_element and app_num_element.text.strip():
-                        all_patents[patent_number]['application_number'] = app_num_element.text.strip()
-                except (NoSuchElementException, StaleElementReferenceException):
-                    pass
-
-            except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
-                logging.warning(f"Could not fetch details for {patent_number}. Error: {str(e)}", exc_info=True)
-
-                # --- Enhanced Debugging ---
-                try:
-                    # Save a screenshot for debugging
+                    # Save screenshot
                     screenshot_path = os.path.join(job_download_dir, f"error_{patent_number}.png")
                     driver.save_screenshot(screenshot_path)
-                    logging.info(f"Saved error screenshot to {screenshot_path}")
+                    logging.info(f"Saved screenshot to {screenshot_path}")
 
                     # Save page source
                     page_source_path = os.path.join(job_download_dir, f"error_{patent_number}.html")
@@ -448,17 +437,3 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 if __name__ == '__main__':
     import sys
     import uuid
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    if len(sys.argv) < 2:
-        print("Usage: python search_uspto.py <JSON_PARAMS_STRING>")
-        sys.exit(1)
-    try:
-        test_params = json.loads(sys.argv[1])
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON params: {e}")
-        sys.exit(1)
-    test_job_id = f"test-uspto-job-{uuid.uuid4()}"
-    test_download_dir = tempfile.gettempdir()
-    def print_result_to_console(job_id, result):
-        print(json.dumps(result, indent=2))
-    execute(test_job_id, test_params, test_download_dir, print_result_to_console)
