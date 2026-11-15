@@ -179,19 +179,24 @@ def _handle_initial_popups(driver):
 
 
 def _click_search_button(driver, timeout=20):
-    """Clicks the search button with fallback to dismiss popups and JS click if intercepted."""
+    """
+    Submits search directly via JavaScript click or form submission to avoid
+    ElementClickInterceptedException caused by lingering or asynchronous modal dialogs.
+    Falls back to normal click and popup dismissal if necessary.
+    """
     search_button = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, "search-btn-search")))
     try:
-        search_button.click()
-    except (ElementClickInterceptedException, StaleElementReferenceException):
-        logging.warning("search_button.click() intercepted or stale; attempting popup cleanup and JS click.")
+        # Direct JS click bypasses viewport coordinate hit-testing and overlays like modal-dialog
+        driver.execute_script("arguments[0].click();", search_button)
+    except Exception as js_err:
+        logging.warning(f"JS click on search_button failed ({js_err}); attempting popup cleanup and standard click.")
         _handle_initial_popups(driver)
         search_button = driver.find_element(By.ID, "search-btn-search")
         try:
-            driver.execute_script("arguments[0].click();", search_button)
-        except Exception as click_err:
-            logging.warning(f"JS click on search_button failed: {click_err}. Retrying once.")
-            time.sleep(1)
+            search_button.click()
+        except ElementClickInterceptedException:
+            # Dismiss popups again and force JS click
+            _handle_initial_popups(driver)
             driver.execute_script("arguments[0].click();", search_button)
 
 
