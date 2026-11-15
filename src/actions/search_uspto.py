@@ -195,6 +195,38 @@ def _click_search_button(driver, timeout=20):
             driver.execute_script("arguments[0].click();", search_button)
 
 
+def _format_single_keyword(term):
+    """
+    Formats a single keyword or phrase. Encloses phrases containing spaces in double quotes.
+    """
+    stripped = term.strip()
+    if ' ' in stripped and not (stripped.startswith('"') and stripped.endswith('"')):
+        return f'"{stripped}"'
+    return stripped
+
+
+def _build_uspto_query(query_keywords):
+    """
+    Builds a boolean query string from a list of keyword items.
+    Items with semicolons (e.g. 'cGAS; cGAMP; STING') represent OR-groups:
+    ("cGAS" OR "cGAMP" OR "STING").
+    Different items in query_keywords are combined with AND:
+    ("cGAS" OR "cGAMP" OR "STING") AND ("LNP" OR "Lipid Nanoparticle")
+    """
+    processed_keywords = []
+    for keyword in query_keywords:
+        if ';' in keyword:
+            alternatives = [alt.strip() for alt in keyword.split(';') if alt.strip()]
+            if len(alternatives) > 1:
+                or_group = " OR ".join(_format_single_keyword(alt) for alt in alternatives)
+                processed_keywords.append(f"({or_group})")
+            elif alternatives:
+                processed_keywords.append(_format_single_keyword(alternatives[0]))
+        else:
+            processed_keywords.append(_format_single_keyword(keyword))
+    return " AND ".join(processed_keywords)
+
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Performs a USPTO patent search based on the provided queries,
@@ -237,14 +269,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 _handle_initial_popups(driver)
             
             queries_in_session += 1
-            processed_keywords = []
-            for keyword in query_keywords:
-                stripped_keyword = keyword.strip()
-                if ' ' in stripped_keyword and not (stripped_keyword.startswith('"') and stripped_keyword.endswith('"')):
-                    processed_keywords.append(f'"{stripped_keyword}"')
-                else:
-                    processed_keywords.append(stripped_keyword)
-            query = " AND ".join(processed_keywords)
+            query = _build_uspto_query(query_keywords)
             logging.info(f"Performing search for query: '{query}'")
 
             total_patents_found = 0

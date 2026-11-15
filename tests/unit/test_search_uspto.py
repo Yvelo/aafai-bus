@@ -2,11 +2,26 @@ import pytest
 from unittest.mock import MagicMock, patch
 import tempfile
 import shutil
-from src.actions.search_uspto import execute
+from src.actions.search_uspto import execute, _build_uspto_query
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 
 class TestSearchUsptoUnit:
+
+    def test_build_uspto_query_with_semicolons(self):
+        """
+        Tests that semicolons inside query terms are split into OR-groups,
+        multi-word phrases are quoted, and terms are joined with AND.
+        """
+        keywords = ["cGAS; cGAMP; STING", "LNP; Lipid Nanoparticle"]
+        expected = '("cGAS" OR "cGAMP" OR "STING") AND ("LNP" OR "Lipid Nanoparticle")'
+        assert _build_uspto_query(keywords) == expected
+
+    def test_build_uspto_query_single_term_and_mixed(self):
+        """Tests building queries with single terms and OR groups combined."""
+        keywords = ["cGAS", "Hepatocellular Carcinoma; HCC; Liver Cancer", "mRNA"]
+        expected = 'cGAS AND ("Hepatocellular Carcinoma" OR "HCC" OR "Liver Cancer") AND mRNA'
+        assert _build_uspto_query(keywords) == expected
 
     @patch('src.actions.search_uspto.ActionChains')
     @patch('src.actions.search_uspto.WebDriverWait')
