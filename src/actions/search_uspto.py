@@ -178,6 +178,23 @@ def _handle_initial_popups(driver):
             pass
 
 
+def _click_search_button(driver, timeout=20):
+    """Clicks the search button with fallback to dismiss popups and JS click if intercepted."""
+    search_button = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, "search-btn-search")))
+    try:
+        search_button.click()
+    except (ElementClickInterceptedException, StaleElementReferenceException):
+        logging.warning("search_button.click() intercepted or stale; attempting popup cleanup and JS click.")
+        _handle_initial_popups(driver)
+        search_button = driver.find_element(By.ID, "search-btn-search")
+        try:
+            driver.execute_script("arguments[0].click();", search_button)
+        except Exception as click_err:
+            logging.warning(f"JS click on search_button failed: {click_err}. Retrying once.")
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", search_button)
+
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """
     Performs a USPTO patent search based on the provided queries,
@@ -240,13 +257,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver.execute_script("arguments[0].editor.loadHTML('')", search_input)
                 search_input.send_keys(query)
                 time.sleep(1)
-                search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "search-btn-search")))
-                try:
-                    search_button.click()
-                except ElementClickInterceptedException:
-                    logging.warning("search_button.click() intercepted; attempting popup cleanup and JS click fallback.")
-                    _handle_initial_popups(driver)
-                    driver.execute_script("arguments[0].click();", search_button)
+                _click_search_button(driver)
                 logging.info("Search submitted.")
                 
                 # Wait for the result bar to appear, which indicates the search is complete
@@ -357,13 +368,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver.execute_script("arguments[0].editor.loadHTML('')", search_input)
                 search_input.send_keys(patent_number)
                 time.sleep(1)
-                search_button = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "search-btn-search")))
-                try:
-                    search_button.click()
-                except ElementClickInterceptedException:
-                    logging.warning("search_button.click() intercepted during abstract search; attempting fallback.")
-                    _handle_initial_popups(driver)
-                    driver.execute_script("arguments[0].click();", search_button)
+                _click_search_button(driver)
 
                 # Handle pop-ups that might appear after a search
                 _handle_initial_popups(driver)
