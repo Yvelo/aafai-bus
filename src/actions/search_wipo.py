@@ -16,7 +16,8 @@ import time
 import json
 import re
 from selenium.common.exceptions import (TimeoutException, NoSuchElementException,
-                                        StaleElementReferenceException, ElementClickInterceptedException)
+                                        StaleElementReferenceException, ElementClickInterceptedException,
+                                        WebDriverException)
 from selenium.webdriver.common.action_chains import ActionChains
 
 # Base URL for WIPO
@@ -104,6 +105,36 @@ def _get_detail_field(driver, label):
         return None
 
 
+def _solve_captcha_if_present(driver, job_download_dir, max_attempts=20):
+    """
+    Checks for psCaptchaForm and attempts to solve it by clicking an image.
+    Returns True if solved or not present, False if failed.
+    """
+    captcha_attempts = 0
+    while captcha_attempts < max_attempts:
+        try:
+            captcha_form = driver.find_element(By.ID, "psCaptchaForm")
+            captcha_attempts += 1
+            logging.warning(f"CAPTCHA detected. Attempt {captcha_attempts}/{max_attempts} to solve.")
+
+            if "Wrong answer!" in driver.page_source:
+                logging.warning("CAPTCHA answer rejected. Retrying next image.")
+
+            images = captcha_form.find_elements(By.CSS_SELECTOR, "a[id^='click']")
+            if not images:
+                logging.error("CAPTCHA form found, but no images to click.")
+                return False
+
+            driver.execute_script("arguments[0].click();", random.choice(images))
+            time.sleep(3)
+        except NoSuchElementException:
+            logging.info("CAPTCHA solved or not present.")
+            return True
+
+    logging.error(f"Failed to solve CAPTCHA after {max_attempts} attempts.")
+    return False
+
+
 def _parse_single_patent(patent_element):
     """
     Parses a single WIPO patent element from the results table row.
@@ -183,7 +214,6 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         query_index = 0
         while query_index < len(search_iterations):
-            captcha_attempts = 0
             query_keywords = search_iterations[query_index]
             
             if query_index > 0 and query_index % MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION == 0:
@@ -216,56 +246,31 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             logging.info(f"Performing search for query: '{query}'")
 
             try:
-                # Check for and attempt to solve CAPTCHA
-                while captcha_attempts < 20:
-                    try:
-                        captcha_form = driver.find_element(By.ID, "psCaptchaForm")
-                        captcha_attempts += 1
-                        logging.warning(f"CAPTCHA detected. Attempt {captcha_attempts}/20 to solve.")
-                        
-                        if "Wrong answer!" in driver.page_source:
-                            logging.error("CAPTCHA failed. Restarting session and retrying query.")
-                            driver.quit()
-                            time.sleep(5)
-                            driver = _setup_driver(job_download_dir)
-                            driver.get(WIPO_BASE_URL)
-                            break  # Break from CAPTCHA loop to retry query
-                        
-                        images = captcha_form.find_elements(By.CSS_SELECTOR, "a[id^='click']")
-                        if not images:
-                            logging.error("CAPTCHA form found, but no images to click.")
-                            break
-                        
-                        driver.execute_script("arguments[0].click();", random.choice(images))
-                        time.sleep(3)
-                    except NoSuchElementException:
-                        logging.info("CAPTCHA solved or not present.")
-                        break
-                else:
-                    logging.error("Failed to solve CAPTCHA after 20 attempts. Skipping query.")
-                    query_index += 1
+                # Solve CAPTCHA if initially present
+                if not _solve_captcha_if_present(driver, job_download_dir):
+                    logging.error("Failed to solve CAPTCHA. Restarting session and retrying query.")
+                    driver.quit()
+                    time.sleep(3)
+                    driver = _setup_driver(job_download_dir)
+                    driver.get(WIPO_BASE_URL)
                     continue
 
                 # Determine which search form is available by checking for the presence of the search input fields.
-                # This is more robust than relying on the query index, as the page state can change unexpectedly
-                # (e.g., after a query with no results).
                 try:
-                    # Try for the simple search form first (present on the main page and sometimes on 'no results' pages)
+                    # Try for the simple search form first (present on main page and sometimes on 'no results' pages)
                     search_input = WebDriverWait(driver, 3).until(
                         EC.presence_of_element_located((By.ID, "simpleSearchForm:fpSearch:input")))
                     search_button_selector = "button.js-default-button"
                 except TimeoutException:
-                    # If the simple form is not there, we expect to be on a results page with an advanced search form.
+                    # If simple form is not there, expect to be on a results page with an advanced search form.
                     try:
                         search_input = WebDriverWait(driver, 10).until(
                             EC.presence_of_element_located((By.ID, "advancedSearchForm:advancedSearchInput:input")))
                         search_button_selector = "button.js-advanced-search-button"
                     except TimeoutException:
-                        # If neither form is found, the page is in an unknown state.
-                        # We'll log an error, navigate to the base URL to reset, and retry the current query.
                         logging.error("Could not find a known search input field. Resetting page and retrying query.")
                         driver.get(WIPO_BASE_URL)
-                        continue  # This will re-run the current query_index in the next loop iteration.
+                        continue
 
                 search_input.clear()
                 search_input.send_keys(query)
@@ -275,21 +280,47 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver.execute_script("arguments[0].click();", search_button)
                 logging.info("Search submitted.")
 
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "results-container")))
-                logging.info("Search results container loaded.")
+                def check_search_status(d):
+                    if d.find_elements(By.ID, "results-container"):
+                        return "results"
+                    if d.find_elements(By.CSS_SELECTOR, "span.results-count, div.ps-no-result"):
+                        return "count_or_no_result"
+                    if d.find_elements(By.ID, "psCaptchaForm"):
+                        return "captcha"
+                    return False
 
-                total_patents_element = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "span.results-count")))
-                total_patents_found = int(total_patents_element.text.replace(',', '').split()[0])
+                search_status = WebDriverWait(driver, 20).until(check_search_status)
+
+                if search_status == "captcha":
+                    logging.warning("CAPTCHA appeared after submitting search. Solving in-place...")
+                    if _solve_captcha_if_present(driver, job_download_dir):
+                        logging.info("In-place CAPTCHA solved. Continuing with query.")
+                    else:
+                        logging.warning("In-place CAPTCHA could not be solved. Retrying query.")
+                    continue
+
+                total_patents_found = 0
+                total_patents_elements = driver.find_elements(By.CSS_SELECTOR, "span.results-count")
+                if total_patents_elements:
+                    count_text = total_patents_elements[0].text.replace(',', '').split()
+                    if count_text:
+                        try:
+                            total_patents_found = int(count_text[0])
+                        except ValueError:
+                            total_patents_found = 0
+
                 logging.info(f"Total patents found for query '{query}': {total_patents_found}")
 
-                if total_patents_found == 0:
+                if total_patents_found == 0 or (
+                        search_status == "count_or_no_result" and not driver.find_elements(By.ID, "results-container")):
                     query_index += 1
                     continue
 
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "results-container")))
+                logging.info("Search results container loaded.")
+
                 patents_scraped_this_query = 0
                 while patents_scraped_this_query < max_patents_per_query:
-                    # Add a retry loop for robustness against stale elements during page processing
                     page_processed_successfully = False
                     for attempt in range(3):
                         try:
@@ -321,51 +352,44 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                                         all_patents[patent_number]['total_patents_in_query'] = total_patents_found
                             
                             page_processed_successfully = True
-                            break  # Break from retry loop if successful
+                            break
 
                         except StaleElementReferenceException:
                             logging.warning(
-                                f"StaleElementReferenceException during page processing (attempt {attempt + 1}/3). Retrying.")
-                            time.sleep(2)  # Wait a bit for the DOM to settle
+                                f"StaleElementReferenceException during page processing "
+                                f"(attempt {attempt + 1}/3). Retrying.")
+                            time.sleep(2)
 
                     if not page_processed_successfully:
                         logging.error(
-                            "Failed to process page after 3 attempts due to StaleElementReferenceException. Breaking pagination.")
+                            "Failed to process page after 3 attempts due to StaleElementReferenceException.")
                         break
                     
                     if patents_scraped_this_query >= max_patents_per_query:
                         break
 
                     try:
-                        # Wait for any loading overlays to disappear
                         WebDriverWait(driver, 10).until(
                             EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.ui-blockui-content")))
                         
-                        # Find and click the 'next' button. This is a common point for StaleElementReferenceException,
-                        # so we'll retry the click a few times if that happens.
                         for attempt in range(3):
                             try:
                                 next_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
                                     (By.CSS_SELECTOR, "a.js-paginator-next:not(.ui-state-disabled)")))
                                 driver.execute_script("arguments[0].click();", next_button)
-                                # If click succeeds, break the retry loop
                                 break
                             except StaleElementReferenceException:
                                 logging.warning(f"StaleElementReferenceException on 'next' button click, "
                                                 f"attempt {attempt + 1}/3. Retrying...")
-                                time.sleep(1)  # Brief pause for the DOM to settle
+                                time.sleep(1)
                         else:
-                            # This 'else' belongs to the 'for' loop. It runs if the loop completes without a 'break'.
-                            # This means all attempts to click failed due to StaleElementReferenceException.
                             logging.error("Failed to click 'next' button due to repeated "
                                           "StaleElementReferenceExceptions.")
-                            break  # Break the outer 'while' loop for pagination
+                            break
 
                     except (NoSuchElementException, TimeoutException, ElementClickInterceptedException):
-                        # This block will catch errors if the 'next' button isn't found or clickable within the timeout,
-                        # which is the expected way to end pagination.
                         logging.info("No more pages or 'next' button is not available.")
-                        break  # Break the 'while' loop for pagination
+                        break
                 
                 query_index += 1
 
@@ -375,10 +399,12 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 continue
         
         logging.info(f"Scraping complete. Found {len(all_patents)} unique patents. Now fetching details...")
+        driver.set_page_load_timeout(15)
         for patent in all_patents.values():
+            patent_number = patent.get('patent_number', 'unknown')
             try:
                 driver.get(patent['link'])
-                WebDriverWait(driver, 10).until(
+                WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div.ps-biblio-data--biblio-card")))
                 
                 try:
@@ -387,8 +413,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 except NoSuchElementException:
                     patent['abstract'] = "Abstract not found."
 
-                patent['filing_date'] = _get_detail_field(driver, 'Application Date') or _get_detail_field(driver,
-                                                                                                         'Filing Date')
+                patent['filing_date'] = (_get_detail_field(driver, 'Application Date')
+                                         or _get_detail_field(driver, 'Filing Date'))
                 patent['application_number'] = (_get_detail_field(driver, 'Application Number')
                                                 or _get_detail_field(driver, 'Publication Number'))
                 patent['date_published'] = _get_detail_field(driver, 'Publication Date') or patent['date_published']
@@ -396,8 +422,11 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 patent['applicant_name'] = _get_detail_field(driver, 'Applicants') or patent['assignee']
                 patent['assignee'] = patent['applicant_name']
 
-            except (TimeoutException, NoSuchElementException) as e:
-                logging.warning(f"Could not fetch details for {patent['patent_number']}: {e}")
+            except TimeoutException:
+                logging.info(f"Detail page not available or timed out for {patent_number}; keeping list metadata.")
+            except WebDriverException as e:
+                err_msg = e.msg.splitlines()[0] if hasattr(e, 'msg') and e.msg else str(e)
+                logging.info(f"Could not load details for {patent_number}: {err_msg}")
 
         final_patents = list(all_patents.values())
         final_patents.sort(key=lambda x: x.get('keyword_matches', 0), reverse=True)
