@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import traceback
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -178,26 +179,61 @@ def _handle_initial_popups(driver):
             pass
 
 
-def _click_search_button(driver, timeout=20):
+def _diagnose_interfering_modals(driver):
+    """Gathers diagnostic details about any modal dialogs currently present in the DOM."""
+    try:
+        modal_info = driver.execute_script("""
+            var modals = document.querySelectorAll('.modal, .modal-dialog, .modal-backdrop');
+            var details = [];
+            modals.forEach(function(m) {
+                var rect = m.getBoundingClientRect();
+                var style = window.getComputedStyle(m);
+                details.push({
+                    tagName: m.tagName,
+                    className: m.className,
+                    id: m.id,
+                    display: style.display,
+                    visibility: style.visibility,
+                    opacity: style.opacity,
+                    zIndex: style.zIndex,
+                    text: (m.innerText || '').substring(0, 300),
+                    rect: {top: rect.top, left: rect.left, width: rect.width, height: rect.height}
+                });
+            });
+            return details;
+        """)
+        return modal_info
+    except Exception as e:
+        return f"Could not collect modal info: {e}"
+
+
+def _click_search_button(driver, timeout=20, context=""):
     """
     Submits search directly via JavaScript click or form submission to avoid
     ElementClickInterceptedException caused by lingering or asynchronous modal dialogs.
     Falls back to normal click and popup dismissal if necessary.
     """
+    _handle_initial_popups(driver)
     search_button = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, "search-btn-search")))
     try:
         # Direct JS click bypasses viewport coordinate hit-testing and overlays like modal-dialog
         driver.execute_script("arguments[0].click();", search_button)
     except Exception as js_err:
-        logging.warning(f"JS click on search_button failed ({js_err}); attempting popup cleanup and standard click.")
+        modal_diag = _diagnose_interfering_modals(driver)
+        logging.warning(
+            f"JS click on search_button failed in context '{context}': {js_err}. "
+            f"Active modals: {json.dumps(modal_diag, default=str)}. Attempting popup cleanup and fallback click."
+        )
         _handle_initial_popups(driver)
         search_button = driver.find_element(By.ID, "search-btn-search")
         try:
-            search_button.click()
-        except ElementClickInterceptedException:
-            # Dismiss popups again and force JS click
-            _handle_initial_popups(driver)
             driver.execute_script("arguments[0].click();", search_button)
+        except Exception as retry_err:
+            modal_diag = _diagnose_interfering_modals(driver)
+            raise RuntimeError(
+                f"Failed to click search button in context '{context}': {retry_err}. "
+                f"Modals present: {json.dumps(modal_diag, default=str)}"
+            ) from retry_err
 
 
 def _format_single_keyword(term):
@@ -248,13 +284,17 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     driver = None
     all_patents = {}
     queries_in_session = 0
+    current_stage = "initializing"
+    current_query_str = ""
 
     try:
         # --- Stage 1: Main search to collect patent metadata ---
+        current_stage = "Stage 1: setup_driver"
         driver = _setup_driver(job_download_dir)
         queries_in_session = 0
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
+        current_stage = "Stage 1: initial_navigation"
         logging.info(f"Navigating to USPTO URL: {USPTO_BASE_URL}")
         try:
             driver.get(USPTO_BASE_URL)
@@ -263,7 +303,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         _handle_initial_popups(driver)
 
-        for query_keywords in queries:
+        for query_idx, query_keywords in enumerate(queries, 1):
             if queries_in_session >= MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION:
                 logging.info(f"Reached query limit for session ({MAXIMUM_NUMBER_OF_QUERIES_PER_SESSION}). Restarting driver.")
                 driver.quit()
@@ -275,6 +315,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             
             queries_in_session += 1
             query = _build_uspto_query(query_keywords)
+            current_query_str = query
+            current_stage = f"Stage 1: query {query_idx}/{len(queries)} ('{query}')"
             logging.info(f"Performing search for query: '{query}'")
 
             total_patents_found = 0
@@ -287,7 +329,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver.execute_script("arguments[0].editor.loadHTML('')", search_input)
                 search_input.send_keys(query)
                 time.sleep(1)
-                _click_search_button(driver)
+                _click_search_button(driver, context=current_stage)
                 logging.info("Search submitted.")
                 
                 # Wait for the result bar to appear, which indicates the search is complete
@@ -380,6 +422,8 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
             if not patent_number:
                 continue
             
+            current_stage = f"Stage 2: fetching abstract {i + 1}/{len(patents_to_update)} ({patent_number})"
+
             # Skip if abstract has already been successfully fetched
             if 'abstract' in all_patents[patent_number] and all_patents[patent_number]['abstract'] not in ["Abstract not fetched.", "Error fetching abstract.", "Abstract section was empty."]:
                 logging.info(f"Skipping abstract fetch for {patent_number}, already have it.")
@@ -398,7 +442,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 driver.execute_script("arguments[0].editor.loadHTML('')", search_input)
                 search_input.send_keys(patent_number)
                 time.sleep(1)
-                _click_search_button(driver)
+                _click_search_button(driver, context=current_stage)
 
                 # Handle pop-ups that might appear after a search
                 _handle_initial_popups(driver)
@@ -448,8 +492,24 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
         result = {'job_id': job_id, 'status': 'Completed', 'result': {'total_patents_scraped': len(final_patents), 'patents': final_patents}}
 
     except Exception as e:
-        logging.error(f"An error occurred during USPTO search for job {job_id}: {e}", exc_info=True)
-        result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
+        detailed_trace = traceback.format_exc()
+        modal_diagnostics = _diagnose_interfering_modals(driver) if driver else "Driver not initialized."
+        current_url = getattr(driver, 'current_url', 'unknown') if driver else 'none'
+        
+        enhanced_error_message = (
+            f"Error in USPTO search [job_id: {job_id} | Stage: {current_stage} | URL: {current_url}]:\n"
+            f"Exception: {e}\n"
+            f"Active modal/dialog elements: {json.dumps(modal_diagnostics, default=str, indent=2)}\n"
+            f"Python Stacktrace:\n{detailed_trace}"
+        )
+        logging.error(f"An error occurred during USPTO search for job {job_id}:\n{enhanced_error_message}")
+        result = {
+            'job_id': job_id,
+            'status': 'failed',
+            'error': enhanced_error_message,
+            'stage': current_stage,
+            'active_modals': modal_diagnostics,
+        }
     finally:
         if driver:
             driver.quit()
