@@ -45,11 +45,14 @@ SEMANTIC_SCHOLAR_BASE_URL = "https://www.semanticscholar.org/search"
 DEFAULT_MAX_NUMBER_OF_ARTICLES = 1000
 DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
 _CHROME_LAUNCH_LOCK = threading.Lock()
+_SEARCH_LOCK = threading.Lock()
 
 
-def _chrome_options(uc, user_data_dir=None):
+def _chrome_options(uc, user_data_dir=None, browser_executable_path=None):
     """Build a new ChromeOptions instance. undetected-chromedriver forbids reusing one."""
     options = uc.ChromeOptions()
+    if isinstance(browser_executable_path, str) and browser_executable_path:
+        options.binary_location = browser_executable_path
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36')
     options.add_argument('--profile-directory=Default')
@@ -188,17 +191,22 @@ def _setup_driver(job_download_dir, download_dir):
 
     is_headless = get_headless_status()
     original_error = None
+    browser_executable = uc.find_chrome_executable()
+    if not isinstance(browser_executable, str) or not browser_executable:
+        browser_executable = None
     detected_version = _detect_chrome_version(uc)
     driver = None
     temp_dir = None
     for attempt in range(3):
         temp_dir = tempfile.mkdtemp(prefix="semantic-scholar-chrome-")
-        launch_options = _chrome_options(uc, temp_dir)
+        launch_options = _chrome_options(uc, temp_dir, browser_executable)
         launch_kwargs = {
             "options": launch_options,
             "headless": is_headless,
             "use_subprocess": True,
         }
+        if browser_executable:
+            launch_kwargs["browser_executable_path"] = browser_executable
         if detected_version:
             launch_kwargs["version_main"] = detected_version
         try:
@@ -992,6 +1000,10 @@ def _run_search(driver, job_id, query_params, fetch_author_details, max_articles
         time.sleep(2)
     except TimeoutException:
         logging.info("Cookie banner not found or not clickable within the timeout period.")
+    except Exception as e:
+        if _is_driver_connection_error(e):
+            raise
+        logging.info("Cookie banner could not be dismissed: %s", e)
 
     _handle_security_check(driver)
 
@@ -1091,6 +1103,16 @@ def _run_search(driver, job_id, query_params, fetch_author_details, max_articles
 def execute(job_id, params, download_dir, write_result_to_outbound):
     """Run a Semantic Scholar search and send its result to the outbound queue."""
     logging.info(f"Executing search_semantic_scholar for job {job_id} with params: {json.dumps(params, indent=2)}")
+    if not _SEARCH_LOCK.acquire(blocking=False):
+        logging.info("Another Semantic Scholar search is running; job %s is waiting.", job_id)
+        _SEARCH_LOCK.acquire()
+    try:
+        _execute_search(job_id, params, download_dir, write_result_to_outbound)
+    finally:
+        _SEARCH_LOCK.release()
+
+
+def _execute_search(job_id, params, download_dir, write_result_to_outbound):
     query_params = params.get('query', {})
     if not query_params:
         raise ValueError("'query' parameter is missing or empty for 'search_semantic_scholar'")

@@ -94,6 +94,10 @@ def _setup_driver(job_download_dir):
         "headless": is_headless,
         "use_subprocess": True,
     }
+    browser_executable = uc.find_chrome_executable()
+    if isinstance(browser_executable, str) and browser_executable:
+        options.binary_location = browser_executable
+        launch_kwargs["browser_executable_path"] = browser_executable
     chrome_version = _detect_chrome_version(uc)
     if chrome_version:
         launch_kwargs["version_main"] = chrome_version

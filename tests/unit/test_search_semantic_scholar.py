@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, call
 import tempfile
@@ -425,6 +427,7 @@ def test_setup_driver_retries_driver_discovery_with_detected_chrome_version():
     assert fake_uc.Chrome.call_count == 2
     assert fake_uc.Chrome.call_args_list[0].kwargs['version_main'] == 132
     assert fake_uc.Chrome.call_args_list[0].kwargs['use_subprocess'] is True
+    assert fake_uc.Chrome.call_args_list[0].kwargs['browser_executable_path'] == fake_uc.find_chrome_executable.return_value
     assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 132
     assert fake_uc.Chrome.call_args_list[1].kwargs['use_subprocess'] is True
     assert call('--user-data-dir=C:\\temp\\uc1') in first_options.add_argument.call_args_list
@@ -486,6 +489,22 @@ def test_quit_driver_ignores_connection_error():
     _quit_driver(driver)
 
     driver.quit.assert_called_once_with()
+
+
+def test_run_search_reraises_dead_driver_while_dismissing_cookie_banner():
+    from src.actions.search_semantic_scholar import _run_search
+
+    driver = MagicMock()
+    driver.find_element.side_effect = ConnectionError(
+        "HTTPConnectionPool(host='localhost', port=41895): Max retries exceeded "
+        "(Caused by NewConnectionError: Failed to establish a new connection: [Errno 111] Connection refused)"
+    )
+
+    with patch('src.actions.search_semantic_scholar._handle_security_check'):
+        with patch('src.actions.search_semantic_scholar.WebDriverWait') as wait:
+            wait.return_value.until.side_effect = driver.find_element.side_effect
+            with pytest.raises(ConnectionError, match='Connection refused'):
+                _run_search(driver, 'job', {'all_words': 'test'}, 'none', 1, None, [], {})
 
 
 def test_get_author_details_propagates_driver_connection_errors():
@@ -632,3 +651,35 @@ def test_run_search_skips_articles_already_collected_on_retry():
                     )
 
     assert result['result']['articles'] == [scraped_article, new_article]
+
+
+def test_execute_runs_only_one_semantic_scholar_search_at_a_time(tmp_path):
+    active = {'count': 0, 'max': 0}
+    state_lock = threading.Lock()
+
+    def slow_search(*args, **kwargs):
+        with state_lock:
+            active['count'] += 1
+            active['max'] = max(active['max'], active['count'])
+        time.sleep(0.05)
+        with state_lock:
+            active['count'] -= 1
+
+    errors = []
+
+    def run_job(job_id):
+        try:
+            execute(job_id, {'query': {'all_words': 'test'}}, str(tmp_path), MagicMock())
+        except Exception as exc:
+            errors.append(exc)
+
+    with patch('src.actions.search_semantic_scholar._execute_search', side_effect=slow_search):
+        threads = [threading.Thread(target=run_job, args=(f'job-{index}',)) for index in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+
+    assert not errors
+    assert active['max'] == 1
+    assert not any(thread.is_alive() for thread in threads)
