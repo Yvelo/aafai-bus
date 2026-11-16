@@ -8,6 +8,7 @@ import atexit
 import importlib
 import logging
 import signal
+import tempfile
 import threading
 from flask import Flask, request, jsonify, render_template, current_app
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -24,6 +25,34 @@ QUEUE_PEREMPTION_DAYS = 7
 
 # --- Global Shutdown Signal ---
 shutdown_event = threading.Event()
+_scheduler_lock_handle = None
+
+
+def _acquire_scheduler_lock():
+    """Hold an exclusive lock for the life of this process. Other workers skip the scheduler."""
+    global _scheduler_lock_handle
+    if _scheduler_lock_handle is not None:
+        return True
+
+    lock_path = os.path.join(tempfile.gettempdir(), "aafai-bus-scheduler.lock")
+    handle = open(lock_path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            handle.write(" ")
+            handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False
+
+    _scheduler_lock_handle = handle
+    return True
 
 def create_app(testing=False):
     """Application factory for the Flask app."""
@@ -70,18 +99,21 @@ def create_app(testing=False):
         logging.info("Running purge job on startup...")
         purge_old_files(app)
 
-        executors = {'default': ThreadPoolExecutor(5)}
-        job_defaults = {'coalesce': False, 'max_instances': 5}
-        scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
-        
-        # Pass the scheduler instance to the jobs that need it
-        scheduler.add_job(func=process_inbound_queue, args=[app, shutdown_event], trigger='interval', seconds=5, id='process_queue')
-        scheduler.add_job(func=check_idle_shutdown, args=[app, scheduler, shutdown_event], trigger='interval', seconds=30, id='idle_check')
-        scheduler.add_job(func=lambda: purge_old_files(app, shutdown_event=shutdown_event), trigger='cron', hour=3, id='purge_old_files_daily')
-        
-        atexit.register(lambda: scheduler.shutdown(wait=False))
-        scheduler.start()
-        logging.info("Scheduler started with recurring jobs enabled.")
+        if _acquire_scheduler_lock():
+            executors = {'default': ThreadPoolExecutor(5)}
+            job_defaults = {'coalesce': False, 'max_instances': 5}
+            scheduler = BackgroundScheduler(executors=executors, job_defaults=job_defaults)
+
+            # Pass the scheduler instance to the jobs that need it
+            scheduler.add_job(func=process_inbound_queue, args=[app, shutdown_event], trigger='interval', seconds=5, id='process_queue')
+            scheduler.add_job(func=check_idle_shutdown, args=[app, scheduler, shutdown_event], trigger='interval', seconds=30, id='idle_check')
+            scheduler.add_job(func=lambda: purge_old_files(app, shutdown_event=shutdown_event), trigger='cron', hour=3, id='purge_old_files_daily')
+
+            atexit.register(lambda: scheduler.shutdown(wait=False))
+            scheduler.start()
+            logging.info("Scheduler started with recurring jobs enabled.")
+        else:
+            logging.info("Scheduler already running in another worker; this worker will only serve HTTP.")
 
     # --- Register Routes ---
     @app.route('/inbound', methods=['POST'])

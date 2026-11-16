@@ -19,7 +19,8 @@ ExecStartPre=/var/www/aafai-bus/venv/bin/python /var/www/aafai-bus/src/startup_p
 
 # Command to start the app using Gunicorn and the application factory.
 # Gunicorn's working directory is set by the 'WorkingDirectory' directive above.
-ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 "server:create_app()"
+# One worker is enough: jobs run on the scheduler thread pool, and extra workers each start their own scheduler.
+ExecStart=/var/www/aafai-bus/venv/bin/gunicorn --workers 1 --bind 0.0.0.0:8000 "server:create_app()"
 
 # Restart the service if it ever fails
 Restart=always
