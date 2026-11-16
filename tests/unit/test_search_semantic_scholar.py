@@ -423,6 +423,8 @@ def test_setup_driver_retries_driver_discovery_with_detected_chrome_version():
 
     assert result is driver
     assert fake_uc.Chrome.call_count == 2
+    assert fake_uc.Chrome.call_args_list[0].kwargs['version_main'] == 132
+    assert fake_uc.Chrome.call_args_list[0].kwargs['use_subprocess'] is True
     assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 132
     assert fake_uc.Chrome.call_args_list[1].kwargs['use_subprocess'] is True
     assert call('--user-data-dir=C:\\temp\\uc1') in first_options.add_argument.call_args_list

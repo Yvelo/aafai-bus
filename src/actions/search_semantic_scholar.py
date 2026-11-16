@@ -82,6 +82,20 @@ def _driver_cache_dir():
     return path
 
 
+def _clear_driver_cache():
+    """Drop a cached chromedriver so the next launch cannot reuse a mismatched binary."""
+    cache_dir = _driver_cache_dir()
+    for name in os.listdir(cache_dir):
+        path = os.path.join(cache_dir, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except OSError as e:
+            logging.debug(f"Could not remove cached ChromeDriver file {path}: {e}")
+
+
 def _launch_chrome(uc, launch_kwargs, profile_dir):
     """Spawn Chrome with a writable home, then restore this process's environment."""
     overrides = {
@@ -113,7 +127,7 @@ def _detect_chrome_version(uc, error=None):
         return int(version_match.group(1))
     try:
         chrome_executable = uc.find_chrome_executable()
-        if not chrome_executable:
+        if not isinstance(chrome_executable, str) or not chrome_executable:
             return None
         version_output = subprocess.run(
             [chrome_executable, "--version"],
@@ -174,7 +188,7 @@ def _setup_driver(job_download_dir, download_dir):
 
     is_headless = get_headless_status()
     original_error = None
-    detected_version = None
+    detected_version = _detect_chrome_version(uc)
     driver = None
     temp_dir = None
     for attempt in range(3):
@@ -183,19 +197,19 @@ def _setup_driver(job_download_dir, download_dir):
         launch_kwargs = {
             "options": launch_options,
             "headless": is_headless,
+            "use_subprocess": True,
         }
-        if attempt:
-            launch_kwargs["use_subprocess"] = True
-            if detected_version:
-                launch_kwargs["version_main"] = detected_version
+        if detected_version:
+            launch_kwargs["version_main"] = detected_version
         try:
             driver = _launch_chrome(uc, launch_kwargs, temp_dir)
             break
         except Exception as e:
             if original_error is None:
                 original_error = e
-            if detected_version is None:
-                detected_version = _detect_chrome_version(uc, e)
+            if "only supports chrome version" in str(e).lower():
+                _clear_driver_cache()
+            detected_version = _detect_chrome_version(uc, e) or detected_version
             logging.warning(
                 "ChromeDriver launch attempt %s of 3 failed: %s",
                 attempt + 1,

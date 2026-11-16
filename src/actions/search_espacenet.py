@@ -87,11 +87,17 @@ def _setup_driver(job_download_dir):
 
     # The driver will now automatically use paths within the temp_dir HOME.
     # Explicitly setting user_data_dir and data_path is no longer needed.
-    driver = uc.Chrome(
-        options=options,
-        headless=is_headless,
-        version_main=144
-    )
+    from src.actions.search_semantic_scholar import _detect_chrome_version
+
+    launch_kwargs = {
+        "options": options,
+        "headless": is_headless,
+        "use_subprocess": True,
+    }
+    chrome_version = _detect_chrome_version(uc)
+    if chrome_version:
+        launch_kwargs["version_main"] = chrome_version
+    driver = uc.Chrome(**launch_kwargs)
 
     # Apply stealth settings to make the browser look more human
     if is_headless:
