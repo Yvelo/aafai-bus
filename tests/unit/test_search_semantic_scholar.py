@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch, PropertyMock, call
 import tempfile
 import shutil
 from src.actions.search_semantic_scholar import execute, _build_semantic_scholar_url, _handle_security_check, _setup_driver
@@ -401,3 +401,88 @@ def test_setup_driver_retries_with_a_fresh_chrome_options():
     assert fake_uc.Chrome.call_args_list[0].kwargs['options'] is first_options
     assert fake_uc.Chrome.call_args_list[1].kwargs['options'] is second_options
     assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 131
+
+
+def test_setup_driver_retries_driver_discovery_with_detected_chrome_version():
+    first_options = MagicMock(name="first_options")
+    second_options = MagicMock(name="second_options")
+    driver = MagicMock()
+    fake_uc = MagicMock()
+    fake_uc.ChromeOptions.side_effect = [first_options, second_options]
+    fake_uc.find_chrome_executable.return_value = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    fake_uc.Chrome.side_effect = [Exception("Unable to obtain driver for chrome"), driver]
+
+    with patch.dict('sys.modules', {'undetected_chromedriver': fake_uc}):
+        with patch('src.actions.search_semantic_scholar.tempfile.mkdtemp', side_effect=[r'C:\temp\uc1', r'C:\temp\uc2']):
+            with patch('src.actions.search_semantic_scholar.subprocess.run', return_value=MagicMock(stdout="Google Chrome 132.0.6834.83", stderr="")):
+                with patch('src.actions.search_semantic_scholar.get_headless_status', return_value=True):
+                    with patch('src.actions.search_semantic_scholar.stealth'):
+                        with patch('src.actions.search_semantic_scholar.shutil.rmtree'):
+                            result = _setup_driver('job-dir', 'download-dir')
+
+    assert result is driver
+    assert fake_uc.Chrome.call_count == 2
+    assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 132
+    assert fake_uc.Chrome.call_args_list[1].kwargs['use_subprocess'] is True
+    assert first_options.add_argument.call_args_list[-1] == call('--user-data-dir=C:\\temp\\uc1')
+    assert second_options.add_argument.call_args_list[-1] == call('--user-data-dir=C:\\temp\\uc2')
+
+
+def test_setup_driver_preserves_original_error_after_all_launch_retries():
+    original_error = Exception("Unable to obtain driver for chrome")
+    fake_uc = MagicMock()
+    fake_uc.find_chrome_executable.return_value = None
+    fake_uc.Chrome.side_effect = [original_error, Exception("retry failed"), Exception("final failure")]
+
+    with patch.dict('sys.modules', {'undetected_chromedriver': fake_uc}):
+        with patch('src.actions.search_semantic_scholar.tempfile.mkdtemp', side_effect=[r'C:\temp\uc1', r'C:\temp\uc2', r'C:\temp\uc3']):
+            with patch('src.actions.search_semantic_scholar.get_headless_status', return_value=True):
+                with patch('src.actions.search_semantic_scholar.shutil.rmtree'):
+                    with pytest.raises(Exception) as error:
+                        _setup_driver('job-dir', 'download-dir')
+
+    assert error.value is original_error
+    assert fake_uc.Chrome.call_count == 3
+
+
+def test_quit_driver_ignores_connection_error():
+    from src.actions.search_semantic_scholar import _quit_driver
+
+    driver = MagicMock()
+    driver.quit.side_effect = ConnectionError("Connection refused")
+
+    _quit_driver(driver)
+
+    driver.quit.assert_called_once_with()
+
+
+@patch('src.actions.search_semantic_scholar._run_search')
+@patch('src.actions.search_semantic_scholar._setup_driver')
+def test_execute_restarts_driver_connection_failure_before_first_article(mock_setup_driver, mock_run_search, tmp_path):
+    from src.actions.search_semantic_scholar import execute
+
+    first_driver = MagicMock()
+    second_driver = MagicMock()
+    mock_setup_driver.side_effect = [first_driver, second_driver]
+    completed_result = {
+        'job_id': 'restart-test',
+        'status': 'Completed',
+        'result': {'articles': []},
+    }
+    mock_run_search.side_effect = [
+        ConnectionError("HTTPConnectionPool(host='localhost'): Connection refused"),
+        completed_result,
+    ]
+    write_result = MagicMock()
+
+    execute(
+        'restart-test',
+        {'query': {'all_words': 'test'}},
+        str(tmp_path),
+        write_result,
+    )
+
+    assert mock_setup_driver.call_count == 2
+    assert mock_run_search.call_count == 2
+    first_driver.quit.assert_called_once_with()
+    write_result.assert_called_once_with('restart-test', completed_result)

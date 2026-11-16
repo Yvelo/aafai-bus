@@ -28,6 +28,7 @@ from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 import tempfile
+import subprocess
 from urllib.parse import urlencode, urljoin
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -44,7 +45,7 @@ DEFAULT_MAX_NUMBER_OF_ARTICLES = 1000
 DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
 
 
-def _chrome_options(uc):
+def _chrome_options(uc, user_data_dir=None):
     """Build a new ChromeOptions instance. undetected-chromedriver forbids reusing one."""
     options = uc.ChromeOptions()
     options.add_argument('--disable-blink-features=AutomationControlled')
@@ -65,38 +66,115 @@ def _chrome_options(uc):
     options.add_argument("--disable-dev-tools")
     options.add_argument("--log-level=3")
     options.add_argument("--window-size=1920,1080")
+    if user_data_dir:
+        options.add_argument(f"--user-data-dir={user_data_dir}")
     return options
+
+
+def _detect_chrome_version(uc, error=None):
+    """Return Chrome's major version from the launch error or installed binary, if available."""
+    version_match = re.search(r'Current browser version is (\d+)', str(error or ""))
+    if version_match:
+        return int(version_match.group(1))
+    try:
+        chrome_executable = uc.find_chrome_executable()
+        if not chrome_executable:
+            return None
+        version_output = subprocess.run(
+            [chrome_executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        version_match = re.search(r'(\d+)(?:\.\d+)+', f"{version_output.stdout} {version_output.stderr}")
+        return int(version_match.group(1)) if version_match else None
+    except Exception as e:
+        logging.debug(f"Could not detect the installed Chrome version: {e}")
+        return None
+
+
+def _is_driver_connection_error(error):
+    message = f"{type(error).__name__}: {error}".lower()
+    return any(indicator in message for indicator in (
+        "unable to obtain driver for chrome",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "failed to establish a new connection",
+        "max retries exceeded",
+        "remote end closed",
+        "chrome not reachable",
+        "session not created",
+        "invalid session id",
+        "disconnected",
+    ))
+
+
+def _quit_driver(driver):
+    if driver is None:
+        return
+    try:
+        driver.quit()
+    except Exception as e:
+        logging.debug(f"Could not cleanly shut down ChromeDriver: {e}")
+
+
+def _cleanup_driver(driver):
+    if driver is None:
+        return
+    _quit_driver(driver)
+    time.sleep(1)
+    temp_dir = getattr(driver, "temp_dir", None)
+    if isinstance(temp_dir, str) and temp_dir:
+        try:
+            shutil.rmtree(temp_dir)
+        except OSError as e:
+            logging.warning(f"Could not remove temporary directory {temp_dir}: {e}")
 
 
 def _setup_driver(job_download_dir, download_dir):
     """Configures and returns a Chrome WebDriver instance using undetected-chromedriver."""
-    temp_dir = tempfile.mkdtemp()
-    os.environ['HOME'] = temp_dir
-
     import undetected_chromedriver as uc
 
     is_headless = get_headless_status()
-
-    try:
-        # First attempt: let undetected-chromedriver auto-detect the installed Chrome version
-        driver = uc.Chrome(
-            options=_chrome_options(uc),
-            headless=is_headless
-        )
-    except Exception as e:
-        # Fallback: if auto-detection failed due to version mismatch, parse the browser version from error if possible.
-        # A fresh ChromeOptions is required: the first launch already consumed the previous one.
-        version_match = re.search(r'Current browser version is (\d+)', str(e))
-        if version_match:
-            detected_version = int(version_match.group(1))
-            logging.info(f"Retrying undetected_chromedriver with detected Chrome version {detected_version}")
-            driver = uc.Chrome(
-                options=_chrome_options(uc),
-                headless=is_headless,
-                version_main=detected_version
+    original_error = None
+    detected_version = None
+    driver = None
+    temp_dir = None
+    for attempt in range(3):
+        temp_dir = tempfile.mkdtemp(prefix="semantic-scholar-chrome-")
+        launch_options = _chrome_options(uc, temp_dir)
+        launch_kwargs = {
+            "options": launch_options,
+            "headless": is_headless,
+        }
+        if attempt:
+            launch_kwargs["use_subprocess"] = True
+            if detected_version:
+                launch_kwargs["version_main"] = detected_version
+        try:
+            driver = uc.Chrome(**launch_kwargs)
+            break
+        except Exception as e:
+            if original_error is None:
+                original_error = e
+            if detected_version is None:
+                detected_version = _detect_chrome_version(uc, e)
+            logging.warning(
+                "ChromeDriver launch attempt %s of 3 failed: %s",
+                attempt + 1,
+                e,
             )
-        else:
-            raise
+            try:
+                shutil.rmtree(temp_dir)
+            except OSError as cleanup_error:
+                logging.debug(f"Could not remove failed Chrome profile {temp_dir}: {cleanup_error}")
+            if attempt == 2:
+                raise original_error
+
+    if driver is None:
+        raise original_error
 
     if is_headless:
         stealth(
@@ -824,11 +902,119 @@ def _extract_matched_authors(driver):
     return authors
 
 
+def _run_search(driver, job_id, query_params, fetch_author_details, max_articles,
+                relevant_author_query, all_results, author_profile_cache):
+    matched_authors = []
+    page = 1
+    total_estimated_results = float('inf')
+    estimated_articles = 0
+    estimated_citations = 0
+
+    search_url = _build_semantic_scholar_url(query_params)
+    logging.info(f"Navigating to Semantic Scholar URL: {search_url}")
+    try:
+        driver.get(search_url)
+    except TimeoutException:
+        logging.warning("Initial page load timed out. The page might be partially loaded.")
+
+    _handle_security_check(driver)
+
+    try:
+        wait = WebDriverWait(driver, 5)
+        cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-test-id="cookie-banner__dismiss-btn"]')))
+        logging.info("Cookie banner found. Clicking 'ACCEPT & CONTINUE'.")
+        cookie_button.click()
+        time.sleep(2)
+    except TimeoutException:
+        logging.info("Cookie banner not found or not clickable within the timeout period.")
+
+    _handle_security_check(driver)
+
+    while len(all_results) < max_articles:
+        if page == 1:
+            estimated_from_header = _get_total_estimated_results(driver)
+            if estimated_from_header > 0:
+                total_estimated_results = estimated_from_header
+                logging.info(f"Total estimated results found from header: {total_estimated_results}")
+
+            if query_params.get("author"):
+                matched_authors = _extract_matched_authors(driver)
+                if matched_authors:
+                    if fetch_author_details != 'none':
+                        logging.info(f"Fetching details for {len(matched_authors)} matched authors.")
+                        for author in matched_authors:
+                            author_url = author.get("author_url")
+                            if author_url:
+                                if author_url not in author_profile_cache:
+                                    should_fetch = (fetch_author_details == 'all') or \
+                                                   (fetch_author_details == 'relevant' and _is_author_relevant(author.get('name', ''), relevant_author_query))
+                                    if should_fetch:
+                                        details = _get_author_details(driver, author_url)
+                                        author_profile_cache[author_url] = details
+                                    else:
+                                        author_profile_cache[author_url] = {}
+                                details = author_profile_cache.get(author_url, {})
+                                author.update(details)
+                    estimated_articles = sum(author.get('publications') or 0 for author in matched_authors)
+                    estimated_citations = sum(author.get('total_citations') or author.get('citations') or 0 for author in matched_authors)
+                    logging.info(f"Total estimated articles from matched authors: {estimated_articles}")
+                    logging.info(f"Total estimated citations from matched authors: {estimated_citations}")
+                else:
+                    estimated_articles = estimated_from_header
+            else:
+                estimated_articles = estimated_from_header
+
+        logging.info(f"Scraping results from page {page}...")
+        article_elements = driver.find_elements(By.CSS_SELECTOR, 'div.cl-paper-row')
+        logging.info(f"Found {len(article_elements)} article elements on the page.")
+        if not article_elements:
+            logging.info("No more results found. Ending pagination.")
+            break
+        for i, article_element in enumerate(article_elements):
+            if len(all_results) >= max_articles:
+                break
+            try:
+                parsed_article = _parse_single_article(article_element, driver, fetch_author_details, relevant_author_query, author_profile_cache)
+                if parsed_article.get("title"):
+                    all_results.append(parsed_article)
+            except Exception as e:
+                logging.warning(f"Error parsing article {i} on page {page}: {e}", exc_info=True)
+        logging.info(f"Total scraped so far: {len(all_results)}")
+        if len(all_results) >= max_articles or len(all_results) >= total_estimated_results:
+            logging.info("Max articles or estimated total reached. Ending pagination.")
+            break
+        try:
+            next_button = driver.find_element(By.CSS_SELECTOR, 'button[data-test-id="next-page"]')
+            if not next_button.is_enabled():
+                logging.info("Next page button is disabled. Ending pagination.")
+                break
+            driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+            time.sleep(1)
+            next_button.click()
+            page += 1
+            time.sleep(5)
+            _handle_security_check(driver)
+        except (NoSuchElementException, ElementClickInterceptedException):
+            logging.info("No next page button found or it was not clickable. Ending pagination.")
+            break
+
+    all_results.sort(key=lambda x: x.get('citations', 0), reverse=True)
+    return {
+        'job_id': job_id,
+        'status': 'Completed',
+        'result': {
+            'search_query': query_params,
+            'total_results_scraped': len(all_results),
+            'estimated_article_count': estimated_articles,
+            'estimated_citation_count': estimated_citations,
+            'matched_authors': matched_authors,
+            'articles': all_results,
+        },
+    }
+
+
 def execute(job_id, params, download_dir, write_result_to_outbound):
-    """
-    Performs a Semantic Scholar search based on the provided parameters,
-    scrapes the results, and returns them in the outbound JSON message.
-    """
+    """Run a Semantic Scholar search and send its result to the outbound queue."""
     logging.info(f"Executing search_semantic_scholar for job {job_id} with params: {json.dumps(params, indent=2)}")
     query_params = params.get('query', {})
     if not query_params:
@@ -840,124 +1026,42 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     os.makedirs(job_download_dir, exist_ok=True)
     driver = None
     all_results = []
-    matched_authors = []
-    page = 1
-    total_estimated_results = float('inf')
-    estimated_articles = 0
-    estimated_citations = 0
-    author_profile_cache = {}
+
     try:
-        driver = _setup_driver(job_download_dir, download_dir)
-
-        search_url = _build_semantic_scholar_url(query_params)
-        logging.info(f"Navigating to Semantic Scholar URL: {search_url}")
-        try:
-            driver.get(search_url)
-        except TimeoutException:
-            logging.warning("Initial page load timed out. The page might be partially loaded.")
-
-        # Check for bot challenge / security verification
-        _handle_security_check(driver)
-
-        # Handle cookie banner if it appears
-        try:
-            wait = WebDriverWait(driver, 5)
-            cookie_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-test-id="cookie-banner__dismiss-btn"]')))
-            logging.info("Cookie banner found. Clicking 'ACCEPT & CONTINUE'.")
-            cookie_button.click()
-            time.sleep(2)  # Give a moment for the banner to disappear
-        except TimeoutException:
-            logging.info("Cookie banner not found or not clickable within the timeout period.")
-
-        # Re-check in case security check pops up after cookie banner dismissal
-        _handle_security_check(driver)
-
-        while len(all_results) < max_articles:
-            if page == 1:
-                estimated_from_header = _get_total_estimated_results(driver)
-                if estimated_from_header > 0:
-                    total_estimated_results = estimated_from_header
-                    logging.info(f"Total estimated results found from header: {total_estimated_results}")
-                
-                if query_params.get("author"):
-                    matched_authors = _extract_matched_authors(driver)
-                    if matched_authors:
-                        if fetch_author_details != 'none':
-                            logging.info(f"Fetching details for {len(matched_authors)} matched authors.")
-                            for author in matched_authors:
-                                author_url = author.get("author_url")
-                                if author_url:
-                                    if author_url not in author_profile_cache:
-                                        should_fetch = (fetch_author_details == 'all') or \
-                                                       (fetch_author_details == 'relevant' and _is_author_relevant(author.get('name', ''), relevant_author_query))
-                                        if should_fetch:
-                                            details = _get_author_details(driver, author_url)
-                                            author_profile_cache[author_url] = details
-                                        else:
-                                            author_profile_cache[author_url] = {}
-                                    details = author_profile_cache.get(author_url, {})
-                                    author.update(details)
-                        estimated_articles = sum(author.get('publications') or 0 for author in matched_authors)
-                        estimated_citations = sum(author.get('total_citations') or author.get('citations') or 0 for author in matched_authors)
-                        logging.info(f"Total estimated articles from matched authors: {estimated_articles}")
-                        logging.info(f"Total estimated citations from matched authors: {estimated_citations}")
-                    else:
-                        estimated_articles = estimated_from_header
-                else:
-                    estimated_articles = estimated_from_header
-
-            logging.info(f"Scraping results from page {page}...")
-            article_elements = driver.find_elements(By.CSS_SELECTOR, 'div.cl-paper-row')
-            logging.info(f"Found {len(article_elements)} article elements on the page.")
-            if not article_elements:
-                logging.info("No more results found. Ending pagination.")
-                break
-            for i, article_element in enumerate(article_elements):
-                if len(all_results) >= max_articles:
-                    break
-                try:
-                    parsed_article = _parse_single_article(article_element, driver, fetch_author_details, relevant_author_query, author_profile_cache)
-                    if parsed_article.get("title"):
-                        all_results.append(parsed_article)
-                except Exception as e:
-                    logging.warning(f"Error parsing article {i} on page {page}: {e}", exc_info=True)
-            logging.info(f"Total scraped so far: {len(all_results)}")
-            if len(all_results) >= max_articles or len(all_results) >= total_estimated_results:
-                logging.info("Max articles or estimated total reached. Ending pagination.")
-                break
+        for attempt in range(2):
+            all_results.clear()
+            author_profile_cache = {}
+            driver = _setup_driver(job_download_dir, download_dir)
             try:
-                next_button = driver.find_element(By.CSS_SELECTOR, 'button[data-test-id="next-page"]')
-                if not next_button.is_enabled():
-                    logging.info("Next page button is disabled. Ending pagination.")
-                    break
-                driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
-                time.sleep(1)
-                next_button.click()
-                page += 1
-                time.sleep(5)
-                _handle_security_check(driver)
-            except (NoSuchElementException, ElementClickInterceptedException):
-                logging.info("No next page button found or it was not clickable. Ending pagination.")
+                result = _run_search(
+                    driver,
+                    job_id,
+                    query_params,
+                    fetch_author_details,
+                    max_articles,
+                    relevant_author_query,
+                    all_results,
+                    author_profile_cache,
+                )
                 break
-        all_results.sort(key=lambda x: x.get('citations', 0), reverse=True)
-        result = {'job_id': job_id, 'status': 'Completed', 'result': {'search_query': query_params, 'total_results_scraped': len(all_results), 'estimated_article_count': estimated_articles, 'estimated_citation_count': estimated_citations, 'matched_authors': matched_authors, 'articles': all_results}}
+            except Exception as e:
+                if attempt == 0 and not all_results and _is_driver_connection_error(e):
+                    logging.warning("ChromeDriver connection failed before any articles were scraped; restarting the browser once.")
+                    _cleanup_driver(driver)
+                    driver = None
+                    continue
+                raise
     except Exception as e:
         logging.error(f"An error occurred during Semantic Scholar search for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
     finally:
-        if driver:
-            driver.quit()
-            time.sleep(1)
-            if hasattr(driver, 'temp_dir'):
-                try:
-                    shutil.rmtree(driver.temp_dir)
-                except OSError as e:
-                    logging.warning(f"Could not remove temporary directory {driver.temp_dir}: {e}")
+        _cleanup_driver(driver)
         if os.path.exists(job_download_dir):
             try:
                 shutil.rmtree(job_download_dir)
             except OSError as e:
                 logging.warning(f"Could not remove job download directory {job_download_dir}: {e}")
+
     logging.info(f"Sending result for job {job_id}: {json.dumps(result, indent=2)}")
     write_result_to_outbound(job_id, result)
 
