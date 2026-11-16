@@ -80,14 +80,17 @@ These tests verify that different parts of the system work together correctly. A
 - **On-Demand & Auto-Shutdown:** Designed to be started by a client and automatically powers off the VM when idle.
 - **Gunicorn & Systemd:** Ready for production deployment using industry-standard tools.
 - **Google Scholar Search (`search_google_scholar`):** An action that performs advanced searches on Google Scholar. It scrapes article details including title, link, snippet, authors (with links to their Scholar profiles, organization, and citation counts where available), publication details, and PDF links. It supports various search parameters (all words, exact phrase, author, publication, date range) and handles pagination up to a configurable maximum number of articles. The author matching logic is designed to be flexible, correctly identifying authors even when names are abbreviated (e.g., a search for "Richard Handler" will correctly match with "R Handler").
-- **Semantic Scholar Search (`search_semantic_scholar`):** Performs an advanced search on Semantic Scholar. It scrapes article details including title, link, snippet, authors (with profile URLs and optionally affiliation, total citations, and h-index), publication details, PDF links, and citation counts. It supports various search parameters and can fetch detailed profiles for all or only relevant authors.
-- **USPTO Patent Search (`search_uspto`):** An action that performs advanced searches on the USPTO patent database. It scrapes patent details including title, link, publication date, inventors, assignees, application number, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped.
-- **WIPO Patent Search (`search_wipo`):** An action that performs advanced searches on the WIPO patent database. It scrapes patent details including title, link, publication date, inventors, assignees, application number, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped per query.
+- **Semantic Scholar Search (`search_semantic_scholar`):** Performs an advanced search on Semantic Scholar. It scrapes article details including title, link, snippet, authors (with profile URLs and optionally affiliation, total citations, and h-index), publication details, PDF links, and citation counts. It supports various search parameters and can fetch detailed profiles for all or only relevant authors. When an AWS WAF CAPTCHA is detected, it calls `solve_captcha` and retries the challenge up to five times; unresolved challenges require manual completion in non-headless mode or fail in headless mode.
+- **USPTO Patent Search (`search_uspto`):** An action that performs advanced searches on the USPTO patent database. It scrapes patent details including title, link, publication date, inventors, assignees, application number, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped. Within each query, semicolon-separated alternatives form an OR group, separate query items are combined with AND, and multi-word terms are quoted as phrases.
+- **WIPO Patent Search (`search_wipo`):** An action that performs advanced searches on the WIPO patent database. It scrapes patent details including title, link, publication date, inventors, assignees, application number, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped per query. It retries image selection up to 20 times per detected CAPTCHA, then retries the search query if the challenge remains.
 - **Espacenet Patent Search (`search_espacenet`):** An action that performs advanced searches on the Espacenet patent database. It scrapes patent details including title, link, publication date, applicant, and abstract. It supports multiple search queries and can be configured to limit the number of patents scraped.
 - **DocSend Downloader (`docsend_download`):** An action to download documents from DocSend links, handling passcodes if required.
 - **Droom Scraper (`scrape_droom`):** An action to scrape detailed information from Droom.org profile pages.
 - **Screen Recording to PDF (`screen_recording_to_pdf`):** Downloads the screen recording (e.g. `.wmv`) of a presentation or document browsed through on screen and reconstructs the browsed pages as a PDF. Scrolled viewers are stitched frame by frame and split into pages on the viewer's page gaps; slide shows keep each displayed slide once, ignoring transitions.
 - **Message Management (`clear_all_messages`, `get_all_messages`):** Provides actions to clear all message queues or retrieve all messages for administrative purposes.
+- **Gemini Prompt (`gemini_prompt`):** Sends a text prompt and optional files to the Gemini API, with optional JSON output and model selection.
+- **OpenRouter Prompt (`openrouter_prompt`):** Sends a text prompt and optional files to OpenRouter, with optional JSON output and model selection. The default model is `google/gemini-2.5-flash`.
+- **CAPTCHA Solver (`solve_captcha`):** Analyzes a JPG or PNG CAPTCHA image with Gemini or OpenRouter and returns the selected-tile matrix as JSON.
 
 ## 6. Setup & Deployment
 
@@ -120,11 +123,17 @@ Headless Chrome often attempts to write user-specific data (like profiles, cache
 
 -   **`HOME`**: The `_setup_driver` function in `full_recursive_download.py` explicitly sets the `HOME` environment variable to a temporary directory created for the driver instance. This forces Chrome to store all its user-specific files within this temporary, writable location, resolving potential permission issues. This temporary directory is cleaned up after the driver quits.
 
+#### Semantic Scholar Chrome Setup
+
+`search_semantic_scholar` uses `undetected_chromedriver`. It creates an isolated temporary Chrome profile for each launch and retries startup up to three times, detecting the installed Chrome version on retries when possible. Chrome's `HOME` and `XDG_*` directories are set to writable profile subdirectories only while the browser starts, then restored in the server process. The patched ChromeDriver cache is placed under the operating system's temporary directory (for example, `/tmp/undetected_chromedriver` on Linux), rather than under a possibly unwritable `~/.local`; ensure the service user can write to the system temporary directory.
+
 ### Production Deployment (Linux)
 1.  Copy the `aafai-bus.service` file to `/etc/systemd/system/`.
 2.  Update paths in the service file to match your deployment directory.
 3.  Reload the systemd daemon: `sudo systemctl daemon-reload`.
 4.  Enable and start the service: `sudo systemctl enable --now aafai-bus.service`.
+
+The supplied `aafai-bus.service` runs Gunicorn with one worker and runs `startup_purge.py` before Gunicorn starts. The application also takes an exclusive lock for the scheduler, so only one process runs the recurring queue, idle-shutdown, and purge jobs even if additional workers are configured.
 
 ## 7. Configuration
 
@@ -132,6 +141,10 @@ Configuration is managed via environment variables, set in the `aafai-bus.servic
 
 - `APP_ENV`: `production` or `development`.
 - `QUEUE_BASE_PATH`: Absolute path for storing queues (e.g., `/var/www/aafai-bus/prod_queues`).
+- `GEMINI_API_KEY`: API key used by `gemini_prompt` and, by default, `solve_captcha`.
+- `OPENROUTER_API_KEY`: API key used by `openrouter_prompt` and by `solve_captcha` when OpenRouter is selected or Gemini credentials are unavailable. `openrouter_prompt` also accepts an optional `api_key` action parameter.
+
+Set API keys in the service environment (or the environment used to run the server). Do not put production secrets in source control.
 
 ## 8. API Endpoints
 
@@ -167,6 +180,8 @@ Performs an advanced search on the WIPO patent database and scrapes the results.
   }
 }
 ```
+
+When the WIPO image CAPTCHA appears, the action retries image selection up to 20 times. If the challenge remains, it retries the search query.
 
 ### `search_espacenet`
 
@@ -204,6 +219,8 @@ Performs an advanced search on the USPTO patent database and scrapes the results
 }
 ```
 
+Each inner list is a query. Within a list, items are combined with `AND`; semicolon-separated values inside one item are treated as alternatives joined with `OR`. Terms with spaces are quoted as phrases automatically. For example, `"cGAS; cGAMP; STING"` is formatted as `("cGAS" OR "cGAMP" OR "STING")`.
+
 ### `search_semantic_scholar`
 
 Performs an advanced search on Semantic Scholar and scrapes the results.
@@ -229,6 +246,62 @@ Performs an advanced search on Semantic Scholar and scrapes the results.
   }
 }
 ```
+
+If an AWS WAF CAPTCHA is detected, the action captures the challenge image, calls `solve_captcha`, applies the returned tile selection, and retries up to five challenge rounds. If the challenge remains, non-headless runs wait for manual completion; headless runs return an error. The solver uses the configured Gemini or OpenRouter credentials.
+
+### `gemini_prompt`
+
+Sends a prompt and optional local files to the Gemini API. Set `GEMINI_API_KEY` in the server environment.
+
+**Input JSON Format:**
+```json
+{
+  "action": "gemini_prompt",
+  "params": {
+    "prompt": "Summarize the attached report.",
+    "files": ["/path/to/report.pdf"],
+    "json_output": false,
+    "model": "gemini-2.5-flash"
+  }
+}
+```
+- `files` is optional and contains file paths accessible to the server. `json_output` and `model` are optional; the default model is `gemini-2.5-flash`.
+
+### `openrouter_prompt`
+
+Sends a prompt and optional local files to OpenRouter. Set `OPENROUTER_API_KEY` in the server environment, or supply `api_key` in the action parameters.
+
+**Input JSON Format:**
+```json
+{
+  "action": "openrouter_prompt",
+  "params": {
+    "prompt": "Summarize the attached report.",
+    "files": ["/path/to/report.pdf"],
+    "json_output": false,
+    "model": "google/gemini-2.5-flash"
+  }
+}
+```
+- `files` is optional and contains file paths accessible to the server. `json_output`, `model`, and `api_key` are optional; the default model is `google/gemini-2.5-flash`.
+
+### `solve_captcha`
+
+Analyzes a JPG or PNG CAPTCHA image and returns a grid matrix indicating which tiles match the requested selection. The action uses Gemini by default; set `provider` to `openrouter` to use OpenRouter.
+
+**Input JSON Format:**
+```json
+{
+  "action": "solve_captcha",
+  "params": {
+    "image_path": "/path/to/captcha.png",
+    "provider": "openrouter",
+    "model": "google/gemini-2.5-flash",
+    "prompt": "Select all tiles containing bicycles."
+  }
+}
+```
+- `image_path` is required. `provider`, `model`, `prompt`, and `api_key` are optional; without an explicit OpenRouter provider, OpenRouter is used automatically when `GEMINI_API_KEY` is unset and `OPENROUTER_API_KEY` is set.
 
 ### `search_google_scholar`
 

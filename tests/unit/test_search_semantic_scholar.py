@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, PropertyMock, call
 import tempfile
 import shutil
 from src.actions.search_semantic_scholar import execute, _build_semantic_scholar_url, _handle_security_check, _setup_driver
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 
 @patch('src.actions.search_semantic_scholar._get_total_estimated_results', return_value=50)
@@ -486,6 +486,21 @@ def test_quit_driver_ignores_connection_error():
     driver.quit.assert_called_once_with()
 
 
+def test_get_author_details_propagates_driver_connection_errors():
+    from src.actions.search_semantic_scholar import _get_author_details
+
+    driver = MagicMock()
+    driver.current_window_handle = 'main-window'
+    driver.window_handles = ['main-window', 'author-window']
+    driver.get.side_effect = ConnectionError('Connection refused')
+
+    with pytest.raises(ConnectionError, match='Connection refused'):
+        _get_author_details(driver, 'https://example.com/author')
+
+    driver.close.assert_called_once_with()
+    driver.switch_to.window.assert_has_calls([call('author-window'), call('main-window')])
+
+
 @patch('src.actions.search_semantic_scholar._run_search')
 @patch('src.actions.search_semantic_scholar._setup_driver')
 def test_execute_restarts_driver_connection_failure_before_first_article(mock_setup_driver, mock_run_search, tmp_path):
@@ -516,3 +531,102 @@ def test_execute_restarts_driver_connection_failure_before_first_article(mock_se
     assert mock_run_search.call_count == 2
     first_driver.quit.assert_called_once_with()
     write_result.assert_called_once_with('restart-test', completed_result)
+
+
+@patch('src.actions.search_semantic_scholar._run_search')
+@patch('src.actions.search_semantic_scholar._setup_driver')
+def test_execute_retries_connection_failure_after_preserving_scraped_articles(mock_setup_driver, mock_run_search, tmp_path):
+    first_driver = MagicMock()
+    second_driver = MagicMock()
+    mock_setup_driver.side_effect = [first_driver, second_driver]
+    article = {'title': 'Already scraped', 'link': 'https://example.com/paper'}
+    completed_result = {'job_id': 'partial-retry-test', 'status': 'Completed', 'result': {'articles': [article]}}
+
+    attempts = 0
+
+    def run_search(*args):
+        nonlocal attempts
+        attempts += 1
+        results = args[6]
+        if attempts == 1:
+            results.append(article)
+            raise ConnectionError("HTTPConnectionPool(host='localhost'): Connection refused")
+        assert results == [article]
+        return completed_result
+
+    mock_run_search.side_effect = run_search
+    write_result = MagicMock()
+
+    with patch('src.actions.search_semantic_scholar._cleanup_driver'):
+        execute('partial-retry-test', {'query': {'all_words': 'test'}}, str(tmp_path), write_result)
+
+    assert mock_setup_driver.call_count == 2
+    assert mock_run_search.call_count == 2
+    write_result.assert_called_once_with('partial-retry-test', completed_result)
+
+
+@patch('src.actions.search_semantic_scholar._run_search')
+@patch('src.actions.search_semantic_scholar._setup_driver')
+def test_execute_returns_partial_results_after_repeated_driver_failures(mock_setup_driver, mock_run_search, tmp_path):
+    drivers = [MagicMock() for _ in range(3)]
+    mock_setup_driver.side_effect = drivers
+    article = {'title': 'Partial result', 'link': 'https://example.com/partial'}
+
+    def fail_with_partial_results(*args):
+        results = args[6]
+        if not results:
+            results.append(article)
+        raise ConnectionError("HTTPConnectionPool(host='localhost'): Connection refused")
+
+    mock_run_search.side_effect = fail_with_partial_results
+    write_result = MagicMock()
+
+    with patch('src.actions.search_semantic_scholar._cleanup_driver'):
+        execute('partial-result-test', {'query': {'all_words': 'test'}}, str(tmp_path), write_result)
+
+    write_result.assert_called_once()
+    _, result = write_result.call_args[0]
+    assert mock_setup_driver.call_count == 3
+    assert mock_run_search.call_count == 3
+    assert result['status'] == 'Completed'
+    assert 'warning' in result
+    assert result['result']['articles'] == [article]
+    assert result['result']['total_results_scraped'] == 1
+
+
+def test_run_search_skips_articles_already_collected_on_retry():
+    from src.actions.search_semantic_scholar import _run_search
+
+    duplicate_article_element = MagicMock()
+    new_article_element = MagicMock()
+    driver = MagicMock()
+    driver.find_elements.return_value = [duplicate_article_element, new_article_element]
+    driver.find_element.side_effect = NoSuchElementException
+    scraped_article = {'title': 'A paper title', 'link': 'https://example.com/first'}
+    articles = [scraped_article]
+    duplicate_article = {'title': ' A PAPER   TITLE ', 'link': 'https://example.com/duplicate'}
+    new_article = {'title': 'A different paper', 'link': 'https://example.com/new'}
+
+    class ImmediateTimeoutWait:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def until(self, *args, **kwargs):
+            raise TimeoutException()
+
+    with patch('src.actions.search_semantic_scholar.WebDriverWait', ImmediateTimeoutWait):
+        with patch('src.actions.search_semantic_scholar._handle_security_check'):
+            with patch('src.actions.search_semantic_scholar._get_total_estimated_results', return_value=2):
+                with patch('src.actions.search_semantic_scholar._parse_single_article', side_effect=[duplicate_article, new_article]):
+                    result = _run_search(
+                        driver,
+                        'dedupe-test',
+                        {'all_words': 'test'},
+                        'none',
+                        10,
+                        None,
+                        articles,
+                        {},
+                    )
+
+    assert result['result']['articles'] == [scraped_article, new_article]

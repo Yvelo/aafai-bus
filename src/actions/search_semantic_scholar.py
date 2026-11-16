@@ -807,6 +807,8 @@ def _get_author_details(driver, author_url):
                 continue
 
     except Exception as e:
+        if _is_driver_connection_error(e):
+            raise
         logging.error(f"Error fetching author details from {author_url}: {e}")
     finally:
         driver.close()
@@ -937,9 +939,23 @@ def _extract_matched_authors(driver):
     return authors
 
 
+def _article_identity_values(article):
+    link = str(article.get("link") or "").strip()
+    title = " ".join(str(article.get("title") or "").split()).casefold()
+    return link, title
+
+
 def _run_search(driver, job_id, query_params, fetch_author_details, max_articles,
                 relevant_author_query, all_results, author_profile_cache):
     matched_authors = []
+    seen_links = set()
+    seen_titles = set()
+    for article in all_results:
+        link, title = _article_identity_values(article)
+        if link:
+            seen_links.add(link)
+        if title:
+            seen_titles.add(title)
     page = 1
     total_estimated_results = float('inf')
     estimated_articles = 0
@@ -1011,8 +1027,18 @@ def _run_search(driver, job_id, query_params, fetch_author_details, max_articles
             try:
                 parsed_article = _parse_single_article(article_element, driver, fetch_author_details, relevant_author_query, author_profile_cache)
                 if parsed_article.get("title"):
+                    link, title = _article_identity_values(parsed_article)
+                    if (link and link in seen_links) or (title and title in seen_titles):
+                        logging.info("Skipping duplicate Semantic Scholar article: %s", parsed_article.get("title"))
+                        continue
                     all_results.append(parsed_article)
+                    if link:
+                        seen_links.add(link)
+                    if title:
+                        seen_titles.add(title)
             except Exception as e:
+                if _is_driver_connection_error(e):
+                    raise
                 logging.warning(f"Error parsing article {i} on page {page}: {e}", exc_info=True)
         logging.info(f"Total scraped so far: {len(all_results)}")
         if len(all_results) >= max_articles or len(all_results) >= total_estimated_results:
@@ -1063,11 +1089,11 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
     all_results = []
 
     try:
-        for attempt in range(2):
-            all_results.clear()
-            author_profile_cache = {}
-            driver = _setup_driver(job_download_dir, download_dir)
+        author_profile_cache = {}
+        for attempt in range(3):
+            driver = None
             try:
+                driver = _setup_driver(job_download_dir, download_dir)
                 result = _run_search(
                     driver,
                     job_id,
@@ -1080,12 +1106,33 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
                 )
                 break
             except Exception as e:
-                if attempt == 0 and not all_results and _is_driver_connection_error(e):
-                    logging.warning("ChromeDriver connection failed before any articles were scraped; restarting the browser once.")
-                    _cleanup_driver(driver)
-                    driver = None
+                if not _is_driver_connection_error(e):
+                    raise
+                logging.warning(
+                    "ChromeDriver connection failed during Semantic Scholar search (attempt %s of 3): %s",
+                    attempt + 1,
+                    e,
+                )
+                _cleanup_driver(driver)
+                driver = None
+                if attempt < 2:
                     continue
-                raise
+                if not all_results:
+                    raise
+                all_results.sort(key=lambda article: article.get('citations', 0), reverse=True)
+                result = {
+                    'job_id': job_id,
+                    'status': 'Completed',
+                    'warning': f"ChromeDriver connection failed after collecting {len(all_results)} articles; returning partial results. Last error: {e}",
+                    'result': {
+                        'search_query': query_params,
+                        'total_results_scraped': len(all_results),
+                        'estimated_article_count': 0,
+                        'estimated_citation_count': 0,
+                        'matched_authors': [],
+                        'articles': all_results,
+                    },
+                }
     except Exception as e:
         logging.error(f"An error occurred during Semantic Scholar search for job {job_id}: {e}", exc_info=True)
         result = {'job_id': job_id, 'status': 'failed', 'error': str(e)}
