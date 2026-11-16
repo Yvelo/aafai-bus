@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
 import shutil
-from src.actions.search_semantic_scholar import execute, _build_semantic_scholar_url, _handle_security_check
+from src.actions.search_semantic_scholar import execute, _build_semantic_scholar_url, _handle_security_check, _setup_driver
 from selenium.common.exceptions import NoSuchElementException
 
 
@@ -376,3 +376,28 @@ class TestSearchSemanticScholarUnit:
         assert not begin_button.click.called
         mock_driver.switch_to.default_content.assert_called_once()
         assert page_source_property.call_count == 2
+
+
+def test_setup_driver_retries_with_a_fresh_chrome_options():
+    """A version-mismatch retry must not reuse the ChromeOptions consumed by the first launch."""
+    first_options = MagicMock(name="first_options")
+    second_options = MagicMock(name="second_options")
+    driver = MagicMock()
+
+    fake_uc = MagicMock()
+    fake_uc.ChromeOptions.side_effect = [first_options, second_options]
+    fake_uc.Chrome.side_effect = [
+        Exception("session not created: Current browser version is 131"),
+        driver,
+    ]
+
+    with patch.dict('sys.modules', {'undetected_chromedriver': fake_uc}):
+        with patch('src.actions.search_semantic_scholar.tempfile.mkdtemp', return_value='C:\\temp\\uc'):
+            with patch('src.actions.search_semantic_scholar.get_headless_status', return_value=True):
+                with patch('src.actions.search_semantic_scholar.stealth'):
+                    result = _setup_driver('job-dir', 'download-dir')
+
+    assert result is driver
+    assert fake_uc.Chrome.call_args_list[0].kwargs['options'] is first_options
+    assert fake_uc.Chrome.call_args_list[1].kwargs['options'] is second_options
+    assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 131

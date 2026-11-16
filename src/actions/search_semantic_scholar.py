@@ -44,16 +44,9 @@ DEFAULT_MAX_NUMBER_OF_ARTICLES = 1000
 DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
 
 
-def _setup_driver(job_download_dir, download_dir):
-    """Configures and returns a Chrome WebDriver instance using undetected-chromedriver."""
-    temp_dir = tempfile.mkdtemp()
-    os.environ['HOME'] = temp_dir
-
-    import undetected_chromedriver as uc
-
+def _chrome_options(uc):
+    """Build a new ChromeOptions instance. undetected-chromedriver forbids reusing one."""
     options = uc.ChromeOptions()
-    is_headless = get_headless_status()
-
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36')
     options.add_argument('--profile-directory=Default')
@@ -72,21 +65,33 @@ def _setup_driver(job_download_dir, download_dir):
     options.add_argument("--disable-dev-tools")
     options.add_argument("--log-level=3")
     options.add_argument("--window-size=1920,1080")
+    return options
+
+
+def _setup_driver(job_download_dir, download_dir):
+    """Configures and returns a Chrome WebDriver instance using undetected-chromedriver."""
+    temp_dir = tempfile.mkdtemp()
+    os.environ['HOME'] = temp_dir
+
+    import undetected_chromedriver as uc
+
+    is_headless = get_headless_status()
 
     try:
         # First attempt: let undetected-chromedriver auto-detect the installed Chrome version
         driver = uc.Chrome(
-            options=options,
+            options=_chrome_options(uc),
             headless=is_headless
         )
     except Exception as e:
-        # Fallback: if auto-detection failed due to version mismatch, parse the browser version from error if possible
+        # Fallback: if auto-detection failed due to version mismatch, parse the browser version from error if possible.
+        # A fresh ChromeOptions is required: the first launch already consumed the previous one.
         version_match = re.search(r'Current browser version is (\d+)', str(e))
         if version_match:
             detected_version = int(version_match.group(1))
             logging.info(f"Retrying undetected_chromedriver with detected Chrome version {detected_version}")
             driver = uc.Chrome(
-                options=options,
+                options=_chrome_options(uc),
                 headless=is_headless,
                 version_main=detected_version
             )
