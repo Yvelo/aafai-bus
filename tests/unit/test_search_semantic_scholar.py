@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock, call
 import tempfile
@@ -424,8 +425,8 @@ def test_setup_driver_retries_driver_discovery_with_detected_chrome_version():
     assert fake_uc.Chrome.call_count == 2
     assert fake_uc.Chrome.call_args_list[1].kwargs['version_main'] == 132
     assert fake_uc.Chrome.call_args_list[1].kwargs['use_subprocess'] is True
-    assert first_options.add_argument.call_args_list[-1] == call('--user-data-dir=C:\\temp\\uc1')
-    assert second_options.add_argument.call_args_list[-1] == call('--user-data-dir=C:\\temp\\uc2')
+    assert call('--user-data-dir=C:\\temp\\uc1') in first_options.add_argument.call_args_list
+    assert call('--user-data-dir=C:\\temp\\uc2') in second_options.add_argument.call_args_list
 
 
 def test_setup_driver_preserves_original_error_after_all_launch_retries():
@@ -443,6 +444,35 @@ def test_setup_driver_preserves_original_error_after_all_launch_retries():
 
     assert error.value is original_error
     assert fake_uc.Chrome.call_count == 3
+
+
+def test_setup_driver_keeps_chromedriver_cache_out_of_home_local():
+    driver = MagicMock()
+    fake_uc = MagicMock()
+    home = r"C:\var\www"
+    seen = {}
+
+    def launch(**kwargs):
+        seen["home"] = os.environ.get("HOME")
+        seen["data_path"] = fake_uc.Patcher.data_path
+        return driver
+
+    fake_uc.Chrome.side_effect = launch
+
+    with patch.dict('sys.modules', {'undetected_chromedriver': fake_uc}):
+        with patch.dict(os.environ, {"HOME": home}, clear=False):
+            with patch('src.actions.search_semantic_scholar.tempfile.mkdtemp', return_value=r'C:\temp\uc1'):
+                with patch('src.actions.search_semantic_scholar.tempfile.gettempdir', return_value=r'C:\temp'):
+                    with patch('src.actions.search_semantic_scholar.get_headless_status', return_value=True):
+                        with patch('src.actions.search_semantic_scholar.stealth'):
+                            with patch('src.actions.search_semantic_scholar.os.makedirs'):
+                                result = _setup_driver('job-dir', 'download-dir')
+            assert os.environ["HOME"] == home
+
+    assert result is driver
+    assert seen["home"] == r'C:\temp\uc1'
+    assert seen["data_path"] == os.path.join(r'C:\temp', 'undetected_chromedriver')
+    assert '.local' not in seen["data_path"]
 
 
 def test_quit_driver_ignores_connection_error():

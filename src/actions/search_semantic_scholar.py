@@ -29,6 +29,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 import tempfile
 import subprocess
+import threading
 from urllib.parse import urlencode, urljoin
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -43,6 +44,7 @@ SEMANTIC_SCHOLAR_BASE_URL = "https://www.semanticscholar.org/search"
 # Default maximum number of articles to scrape if not overridden by inbound message
 DEFAULT_MAX_NUMBER_OF_ARTICLES = 1000
 DEFAULT_NUM_RESULTS_PER_PAGE = 10  # Semantic Scholar shows 10 results per page
+_CHROME_LAUNCH_LOCK = threading.Lock()
 
 
 def _chrome_options(uc, user_data_dir=None):
@@ -68,7 +70,40 @@ def _chrome_options(uc, user_data_dir=None):
     options.add_argument("--window-size=1920,1080")
     if user_data_dir:
         options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument(f"--disk-cache-dir={os.path.join(user_data_dir, 'cache')}")
+        options.add_argument(f"--crash-dumps-dir={os.path.join(user_data_dir, 'crash-dumps')}")
     return options
+
+
+def _driver_cache_dir():
+    """Writable cache for the patched chromedriver. On Linux uc otherwise uses ~/.local."""
+    path = os.path.join(tempfile.gettempdir(), "undetected_chromedriver")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _launch_chrome(uc, launch_kwargs, profile_dir):
+    """Spawn Chrome with a writable home, then restore this process's environment."""
+    overrides = {
+        "HOME": profile_dir,
+        "XDG_CACHE_HOME": os.path.join(profile_dir, "cache"),
+        "XDG_CONFIG_HOME": os.path.join(profile_dir, "config"),
+        "XDG_DATA_HOME": os.path.join(profile_dir, "local"),
+    }
+    for path in overrides.values():
+        os.makedirs(path, exist_ok=True)
+    with _CHROME_LAUNCH_LOCK:
+        previous = {key: os.environ.get(key) for key in overrides}
+        os.environ.update(overrides)
+        uc.Patcher.data_path = _driver_cache_dir()
+        try:
+            return uc.Chrome(**launch_kwargs)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def _detect_chrome_version(uc, error=None):
@@ -154,7 +189,7 @@ def _setup_driver(job_download_dir, download_dir):
             if detected_version:
                 launch_kwargs["version_main"] = detected_version
         try:
-            driver = uc.Chrome(**launch_kwargs)
+            driver = _launch_chrome(uc, launch_kwargs, temp_dir)
             break
         except Exception as e:
             if original_error is None:
