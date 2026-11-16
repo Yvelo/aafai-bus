@@ -5,7 +5,7 @@ import mimetypes
 import base64
 import requests
 
-DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
@@ -123,7 +123,7 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
       - prompt (str): Text prompt to send.
       - files (list of str, optional): File paths to include.
       - json_output (bool, optional): Whether to request and parse JSON output.
-      - model (str, optional): Gemini model version (e.g. 'gemini-1.5-flash').
+      - model (str, optional): Gemini model version (e.g. 'gemini-2.5-flash').
     """
     try:
         prompt = params.get("prompt", "")

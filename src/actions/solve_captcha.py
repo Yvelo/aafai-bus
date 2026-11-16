@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from src.actions.gemini_prompt import call_gemini_api
+from src.actions.openrouter_prompt import call_openrouter_api
 
 CAPTCHA_PROMPT = """You are analyzing an image CAPTCHA puzzle (such as reCAPTCHA or hCaptcha tile selection).
 Analyze the grid in the provided image.
@@ -24,9 +25,9 @@ Each element of 'matrix' must be a boolean (true or false). The dimension of 'ma
 Do not output markdown code blocks or explanations, only valid JSON."""
 
 
-def solve_captcha(image_path, model=None, prompt=None):
+def solve_captcha(image_path, model=None, prompt=None, api_key=None, provider=None):
     """
-    Solves an image captcha (JPG or PNG) by calling Gemini with multimodal input.
+    Solves an image captcha (JPG or PNG) by calling Gemini or OpenRouter with multimodal input.
     Returns a dict containing 'matrix' (list of list of booleans), 'rows', 'cols', etc.
     """
     if not os.path.exists(image_path):
@@ -37,12 +38,27 @@ def solve_captcha(image_path, model=None, prompt=None):
         raise ValueError(f"Unsupported image format: {ext}. Only JPG and PNG are supported.")
 
     effective_prompt = prompt or CAPTCHA_PROMPT
-    result = call_gemini_api(
-        prompt=effective_prompt,
-        files=[image_path],
-        json_output=True,
-        model=model
+    is_openrouter = (
+        provider == "openrouter" or
+        (not os.environ.get("GEMINI_API_KEY") and os.environ.get("OPENROUTER_API_KEY"))
     )
+
+    if is_openrouter:
+        result = call_openrouter_api(
+            prompt=effective_prompt,
+            files=[image_path],
+            json_output=True,
+            model=model,
+            api_key=api_key
+        )
+    else:
+        result = call_gemini_api(
+            prompt=effective_prompt,
+            files=[image_path],
+            json_output=True,
+            model=model,
+            api_key=api_key
+        )
 
     # Normalize result
     if isinstance(result, str):
@@ -78,9 +94,11 @@ def execute(job_id, params, download_dir, write_result_to_outbound):
 
         model = params.get("model")
         custom_prompt = params.get("prompt")
+        provider = params.get("provider")
+        api_key = params.get("api_key")
 
         logging.info(f"Solving captcha for job {job_id} using image: {image_path}")
-        captcha_result = solve_captcha(image_path, model=model, prompt=custom_prompt)
+        captcha_result = solve_captcha(image_path, model=model, prompt=custom_prompt, api_key=api_key, provider=provider)
 
         result_data = {
             "job_id": job_id,

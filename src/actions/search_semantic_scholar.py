@@ -4,6 +4,7 @@ import shutil
 import sys
 from unittest.mock import MagicMock
 from src.browser_config import get_headless_status
+from src.actions.solve_captcha import solve_captcha
 
 # BEGIN: Monkey patch for distutils
 # This is required for undetected-chromedriver to work with Python 3.12+
@@ -25,6 +26,7 @@ if sys.version_info >= (3, 12):
 
 from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 import tempfile
 from urllib.parse import urlencode, urljoin
 from selenium.webdriver.support.ui import WebDriverWait
@@ -69,7 +71,7 @@ def _setup_driver(job_download_dir, download_dir):
     options.add_argument("--disable-logging")
     options.add_argument("--disable-dev-tools")
     options.add_argument("--log-level=3")
-    options.add_argument("--window-size=1920, 1080")
+    options.add_argument("--window-size=1920,1080")
 
     try:
         # First attempt: let undetected-chromedriver auto-detect the installed Chrome version
@@ -107,12 +109,456 @@ def _setup_driver(job_download_dir, download_dir):
     return driver
 
 
+def _element_is_displayed(element):
+    try:
+        return element.is_displayed()
+    except Exception:
+        return False
+
+
+def _button_text(button):
+    try:
+        text = button.text
+        return text.strip().lower() if isinstance(text, str) else ""
+    except Exception:
+        return ""
+
+
+def _is_begin_button(button):
+    text = _button_text(button)
+    if text == "begin" or text.startswith("begin "):
+        return True
+    try:
+        element_id = button.get_attribute("id")
+    except Exception:
+        element_id = None
+    return element_id == "amzn-captcha-verify-button" and text in ("", "begin")
+
+
+def _find_begin_button(driver):
+    try:
+        button = driver.execute_script("""
+            function textOf(el) {
+                return ((el.innerText || el.textContent || '') + '').replace(/\\s+/g, ' ').trim().toLowerCase();
+            }
+            function walk(root) {
+                if (!root || !root.querySelectorAll) return null;
+                var byId = root.querySelector('#amzn-captcha-verify-button');
+                if (byId) {
+                    var label = textOf(byId);
+                    if (!label || label === 'begin' || label.indexOf('begin') === 0) return byId;
+                }
+                var buttons = root.querySelectorAll('button');
+                for (var i = 0; i < buttons.length; i++) {
+                    var label = textOf(buttons[i]);
+                    if (label === 'begin' || label.indexOf('begin') === 0) return buttons[i];
+                }
+                var nodes = root.querySelectorAll('*');
+                for (var j = 0; j < nodes.length; j++) {
+                    if (nodes[j].shadowRoot) {
+                        var found = walk(nodes[j].shadowRoot);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+            return walk(document);
+        """)
+        if button and _is_begin_button(button):
+            return button
+    except Exception:
+        pass
+
+    try:
+        button = driver.find_element(By.ID, "amzn-captcha-verify-button")
+        if _is_begin_button(button):
+            return button
+    except Exception:
+        pass
+    return None
+
+
+def _find_captcha_iframe(driver):
+    try:
+        frames = driver.find_elements(
+            By.CSS_SELECTOR,
+            "#captcha-container iframe, iframe[src*='captcha'], iframe[title*='captcha'], iframe[name*='captcha']"
+        )
+        for frame in frames:
+            if _element_is_displayed(frame):
+                return frame
+    except Exception:
+        pass
+    return None
+
+
+def _captcha_puzzle_is_rendered(driver):
+    if _find_captcha_iframe(driver):
+        return True
+
+    try:
+        canvases = driver.find_elements(By.CSS_SELECTOR, "#captcha-container canvas, canvas")
+        if any(_element_is_displayed(canvas) for canvas in canvases):
+            return True
+    except Exception:
+        pass
+
+    try:
+        images = driver.find_elements(By.CSS_SELECTOR, "#captcha-container img")
+        for image in images:
+            if not _element_is_displayed(image):
+                continue
+            src = image.get_attribute("src") or ""
+            alt = image.get_attribute("alt") or ""
+            size = image.size or {}
+            if "captcha" in alt.lower() or (
+                not src.lower().startswith("data:image/svg+xml")
+                and size.get("width", 0) >= 100
+                and size.get("height", 0) >= 100
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _element_center(driver, element):
+    try:
+        rect = driver.execute_script("""
+            arguments[0].scrollIntoView({block: 'center', inline: 'center'});
+            var r = arguments[0].getBoundingClientRect();
+            return {x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height};
+        """, element)
+        if isinstance(rect, dict):
+            return float(rect["x"]), float(rect["y"])
+    except Exception:
+        return None
+    return None
+
+
+def _find_puzzle_grid(driver, container):
+    """Return the image or canvas that holds the tile grid, not the surrounding challenge chrome."""
+    try:
+        grid = driver.execute_script("""
+            var root = arguments[0];
+            var nodes = root.querySelectorAll('canvas, img');
+            var best = null;
+            var bestArea = 0;
+            for (var i = 0; i < nodes.length; i++) {
+                var node = nodes[i];
+                var src = (node.getAttribute('src') || '').toLowerCase();
+                if (src.indexOf('data:image/svg') === 0) continue;
+                var rect = node.getBoundingClientRect();
+                var area = rect.width * rect.height;
+                if (rect.width >= 120 && rect.height >= 120 && area > bestArea) {
+                    best = node;
+                    bestArea = area;
+                }
+            }
+            return best;
+        """, container)
+        if isinstance(getattr(grid, "tag_name", None), str):
+            return grid
+    except Exception as e:
+        logging.debug(f"Could not locate the CAPTCHA image grid: {e}")
+    return container
+
+
+def _frame_viewport_offset(driver, frame):
+    try:
+        rect = driver.execute_script("""
+            var rect = arguments[0].getBoundingClientRect();
+            return {x: rect.left, y: rect.top};
+        """, frame)
+        if isinstance(rect, dict):
+            return float(rect["x"]), float(rect["y"])
+    except Exception as e:
+        logging.debug(f"Could not determine CAPTCHA iframe position: {e}")
+    return 0.0, 0.0
+
+
+def _offset_for_visible_click(driver, frame, frame_offset, local_x, local_y):
+    """Scroll the captcha frame so a tile click is inside the browser viewport."""
+    if frame is None:
+        return frame_offset
+    top_x = local_x + frame_offset[0]
+    top_y = local_y + frame_offset[1]
+    try:
+        size = driver.get_window_size()
+        if not isinstance(size, dict):
+            return frame_offset
+        width = float(size.get("width") or 0)
+        height = float(size.get("height") or 0)
+    except Exception:
+        return frame_offset
+    if width <= 0 or height <= 0:
+        return frame_offset
+    if 5 <= top_x <= width - 5 and 5 <= top_y <= height - 5:
+        return frame_offset
+    try:
+        driver.switch_to.default_content()
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+            frame,
+        )
+        frame_offset = _frame_viewport_offset(driver, frame)
+        driver.switch_to.frame(frame)
+    except Exception as e:
+        logging.debug(f"Could not scroll the CAPTCHA tile into view: {e}")
+        try:
+            driver.switch_to.frame(frame)
+        except Exception:
+            pass
+    return frame_offset
+
+
+def _dispatch_trusted_click(driver, x, y, coordinate_offset=(0.0, 0.0)):
+    x += coordinate_offset[0]
+    y += coordinate_offset[1]
+    try:
+        for event_type, buttons in (("mouseMoved", 0), ("mousePressed", 1), ("mouseReleased", 0)):
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": event_type,
+                "x": x,
+                "y": y,
+                "button": "left",
+                "buttons": buttons,
+                "clickCount": 1,
+            })
+        return True
+    except Exception as e:
+        logging.debug(f"Trusted mouse click failed: {e}")
+        return False
+
+
+def _trusted_click(driver, element, coordinate_offset=(0.0, 0.0)):
+    center = _element_center(driver, element)
+    if center:
+        x, y = center
+        if _dispatch_trusted_click(driver, x, y, coordinate_offset):
+            return True
+
+    try:
+        ActionChains(driver).move_to_element(element).click().perform()
+        return True
+    except Exception:
+        try:
+            element.click()
+            return True
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", element)
+                return True
+            except Exception:
+                return False
+
+
+def _click_begin_and_wait(driver):
+    begin_button = None
+    for _ in range(8):
+        begin_button = _find_begin_button(driver)
+        if begin_button:
+            break
+        time.sleep(0.5)
+    if not begin_button:
+        logging.info("Security check is visible, but the Begin button was not found.")
+        return
+
+    for attempt in range(3):
+        begin_button = _find_begin_button(driver)
+        if not begin_button and attempt == 0:
+            return
+        if begin_button:
+            logging.info("Found 'Begin' button for AWS WAF CAPTCHA. Clicking it with a trusted mouse event...")
+            if not _trusted_click(driver, begin_button):
+                return
+
+        for _ in range(12):
+            if _captcha_puzzle_is_rendered(driver):
+                return
+            time.sleep(0.5)
+
+
+def _solve_captcha_challenge(driver):
+    captcha_frame = _find_captcha_iframe(driver)
+    switched_to_frame = False
+    frame_offset = (0.0, 0.0)
+    if captcha_frame:
+        frame_offset = _frame_viewport_offset(driver, captcha_frame)
+        try:
+            driver.switch_to.frame(captcha_frame)
+            switched_to_frame = True
+        except Exception as e:
+            frame_offset = (0.0, 0.0)
+            logging.warning(f"Could not switch to CAPTCHA iframe: {e}")
+
+    try:
+        screenshot_path = None
+        captcha_result = None
+        captcha_elem = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                screenshot_path = tmp_img.name
+
+            try:
+                captcha_elem = driver.find_element(By.ID, "captcha-container")
+            except Exception:
+                if switched_to_frame:
+                    try:
+                        captcha_elem = driver.find_element(By.TAG_NAME, "body")
+                    except Exception:
+                        pass
+
+            if captcha_elem:
+                captcha_elem = _find_puzzle_grid(driver, captcha_elem)
+                try:
+                    captcha_elem.screenshot(screenshot_path)
+                except Exception:
+                    driver.save_screenshot(screenshot_path)
+            else:
+                driver.save_screenshot(screenshot_path)
+
+            logging.info(f"Calling solve_captcha action for detected CAPTCHA image: {screenshot_path}")
+            captcha_result = solve_captcha(screenshot_path)
+            logging.info(f"solve_captcha action completed with result: {captcha_result}")
+        except Exception as e:
+            logging.warning(f"Error calling solve_captcha action: {e}")
+        finally:
+            if screenshot_path and os.path.exists(screenshot_path):
+                try:
+                    os.remove(screenshot_path)
+                except Exception:
+                    pass
+
+        if isinstance(captcha_result, dict) and "matrix" in captcha_result:
+            matrix = captcha_result.get("matrix", [])
+            rows = captcha_result.get("rows") or len(matrix)
+            cols = captcha_result.get("cols") or (len(matrix[0]) if matrix and len(matrix) > 0 else 0)
+
+            if rows > 0 and cols > 0 and captcha_elem:
+                logging.info(f"Applying CAPTCHA tile clicks for grid {rows}x{cols}...")
+                for r in range(rows):
+                    for c in range(cols):
+                        if r < len(matrix) and c < len(matrix[r]) and matrix[r][c]:
+                            logging.info(f"Clicking CAPTCHA tile at row {r}, col {c}")
+                            try:
+                                tile_point = driver.execute_script("""
+                                    var container = arguments[0];
+                                    var r = arguments[1];
+                                    var c = arguments[2];
+                                    var rows = arguments[3];
+                                    var cols = arguments[4];
+                                    container.scrollIntoView({block: 'center', inline: 'center'});
+                                    var rect = container.getBoundingClientRect();
+                                    var clickX = rect.left + (c + 0.5) * (rect.width / cols);
+                                    var clickY = rect.top + (r + 0.5) * (rect.height / rows);
+                                    if (clickY < 8 || clickY > window.innerHeight - 8) {
+                                        window.scrollBy(0, clickY - window.innerHeight / 2);
+                                        rect = container.getBoundingClientRect();
+                                        clickX = rect.left + (c + 0.5) * (rect.width / cols);
+                                        clickY = rect.top + (r + 0.5) * (rect.height / rows);
+                                    }
+                                    return {
+                                        x: clickX,
+                                        y: clickY,
+                                        target: document.elementFromPoint(clickX, clickY) || container
+                                    };
+                                """, captcha_elem, r, c, rows, cols)
+                                if isinstance(tile_point, dict):
+                                    try:
+                                        tile_x = float(tile_point["x"])
+                                        tile_y = float(tile_point["y"])
+                                    except (KeyError, TypeError, ValueError):
+                                        tile_x = tile_y = None
+                                    if tile_x is not None and tile_y is not None:
+                                        frame_offset = _offset_for_visible_click(
+                                            driver, captcha_frame, frame_offset, tile_x, tile_y
+                                        )
+                                        if not _dispatch_trusted_click(driver, tile_x, tile_y, frame_offset):
+                                            tile = tile_point.get("target")
+                                            if tile:
+                                                try:
+                                                    ActionChains(driver).move_to_element(tile).click().perform()
+                                                except Exception:
+                                                    tile.click()
+                                else:
+                                    # Keep a DOM-event fallback for drivers that cannot report element coordinates.
+                                    driver.execute_script("""
+                                        var container = arguments[0];
+                                        var r = arguments[1];
+                                        var c = arguments[2];
+                                        var rows = arguments[3];
+                                        var cols = arguments[4];
+                                        var rect = container.getBoundingClientRect();
+                                        var x = rect.left + (c + 0.5) * (rect.width / cols);
+                                        var y = rect.top + (r + 0.5) * (rect.height / rows);
+                                        var elem = document.elementFromPoint(x, y) || container;
+                                        ['mousedown', 'mouseup', 'click'].forEach(function(type) {
+                                            elem.dispatchEvent(new MouseEvent(type, {
+                                                bubbles: true, cancelable: true, view: window,
+                                                clientX: x, clientY: y
+                                            }));
+                                        });
+                                    """, captcha_elem, r, c, rows, cols)
+                                time.sleep(1)
+                            except Exception as tile_err:
+                                logging.warning(f"Could not click tile ({r}, {c}): {tile_err}")
+
+            try:
+                verify_button = None
+                for button_id in ["amzn-captcha-verify-button", "amzn-captcha-submit-button"]:
+                    try:
+                        button = driver.find_element(By.ID, button_id)
+                        if _element_is_displayed(button) and _button_text(button) != "begin":
+                            verify_button = button
+                            break
+                    except Exception:
+                        pass
+                if not verify_button:
+                    try:
+                        buttons = driver.find_elements(
+                            By.CSS_SELECTOR,
+                            ".amzn-captcha-verify-button, .amzn-captcha-submit-button, button[type='submit']"
+                        )
+                        for button in buttons:
+                            if _element_is_displayed(button) and _button_text(button) != "begin":
+                                verify_button = button
+                                break
+                    except Exception:
+                        pass
+
+                if verify_button:
+                    logging.info("Clicking CAPTCHA verify/submit button...")
+                    _trusted_click(driver, verify_button, frame_offset)
+                    time.sleep(2)
+            except Exception as sub_err:
+                logging.warning(f"Error submitting CAPTCHA verification: {sub_err}")
+    finally:
+        if switched_to_frame:
+            try:
+                driver.switch_to.default_content()
+            except Exception as e:
+                logging.debug(f"Could not restore the default document after CAPTCHA handling: {e}")
+
+
+def _captcha_still_present(driver, bot_indicators):
+    try:
+        page_source = driver.page_source or ""
+    except Exception:
+        return False
+    if not isinstance(page_source, str):
+        return False
+    return any(indicator.lower() in page_source.lower() for indicator in bot_indicators)
+
+
 def _handle_security_check(driver, timeout=90):
     """
     Checks if an AWS WAF CAPTCHA / bot challenge page is displayed.
     Automatically clicks 'Begin' (#amzn-captcha-verify-button) if present to open the interactive puzzle.
+    Calls solve_captcha action to process the CAPTCHA image and clicks selected grid tiles.
+    If a wrong answer shows a new puzzle, solve_captcha is called again until the challenge clears.
     In non-headless mode, waits for the user to complete the puzzle until the page redirects back.
-    In headless mode, raises an exception.
+    In headless mode, raises an exception if unresolved.
     """
     bot_indicators = [
         "Complete the security check before continuing",
@@ -128,36 +574,39 @@ def _handle_security_check(driver, timeout=90):
         if any(ind.lower() in page_source.lower() for ind in bot_indicators):
             logging.warning("AWS WAF CAPTCHA / security check detected on Semantic Scholar.")
 
-            # Attempt to click the 'Begin' button if it's there to display the puzzle
-            try:
-                begin_button = driver.find_element(By.ID, "amzn-captcha-verify-button")
-                if begin_button.is_displayed():
-                    logging.info("Found 'Begin' button for AWS WAF CAPTCHA. Clicking it to reveal puzzle...")
-                    driver.execute_script("arguments[0].click();", begin_button)
+            deadline = time.monotonic() + timeout
+            attempts = 0
+            captcha_still_present = True
+            while captcha_still_present and attempts < 5 and time.monotonic() < deadline:
+                _click_begin_and_wait(driver)
+                _solve_captcha_challenge(driver)
+                attempts += 1
+                captcha_still_present = _captcha_still_present(driver, bot_indicators)
+                if captcha_still_present and attempts < 5 and time.monotonic() < deadline:
+                    logging.info("CAPTCHA is still present after attempt %s. Solving the next puzzle.", attempts)
                     time.sleep(2)
-            except NoSuchElementException:
-                pass
-            except Exception as e:
-                logging.debug(f"Could not click 'Begin' button: {e}")
 
-            if not get_headless_status():
-                logging.info(f"Running in non-headless mode: waiting up to {timeout}s for CAPTCHA to be solved...")
-                # Wait until none of the bot challenge indicators remain in page source or container is gone
-                WebDriverWait(driver, timeout, poll_frequency=2).until_not(
-                    lambda d: ("captcha-container" in (d.page_source or "") or
-                               "confirm you are human" in (d.page_source or "").lower() or
-                               "verifies that you are not a bot" in (d.page_source or "").lower())
-                )
-                logging.info("CAPTCHA / Security check resolved successfully.")
-                time.sleep(3)
+            if captcha_still_present:
+                if not get_headless_status():
+                    logging.info(f"Running in non-headless mode: waiting up to {timeout}s for CAPTCHA to be solved...")
+                    # Wait until none of the bot challenge indicators remain in page source or container is gone
+                    WebDriverWait(driver, timeout, poll_frequency=2).until_not(
+                        lambda d: ("captcha-container" in (d.page_source or "") or
+                                   "confirm you are human" in (d.page_source or "").lower() or
+                                   "verifies that you are not a bot" in (d.page_source or "").lower())
+                    )
+                    logging.info("CAPTCHA / Security check resolved successfully.")
+                    time.sleep(3)
+                else:
+                    raise RuntimeError("Semantic Scholar blocked the request with AWS WAF CAPTCHA (headless mode).")
             else:
-                raise RuntimeError("Semantic Scholar blocked the request with AWS WAF CAPTCHA (headless mode).")
+                logging.info("CAPTCHA / Security check resolved automatically.")
     except TimeoutException:
         raise RuntimeError(f"Timed out waiting {timeout}s for AWS WAF CAPTCHA to be resolved.")
     except Exception as e:
-        if "blocked the request" in str(e) or "Timed out waiting" in str(e):
+        if "blocked the request" in str(e):
             raise
-        logging.warning(f"Error checking for security popup: {e}")
+        raise RuntimeError(f"Unable to check Semantic Scholar security verification: {e}") from e
 
 
 def _build_semantic_scholar_url(query_params):
@@ -210,6 +659,7 @@ def _get_author_details(driver, author_url):
     try:
         driver.get(author_url)
         time.sleep(2)
+        _handle_security_check(driver)
         try:
             details["affiliation"] = driver.find_element(By.CSS_SELECTOR, 'ul[data-test-id="author-affiliations"] li').text.strip()
         except NoSuchElementException:
